@@ -36,11 +36,11 @@ jobs:
           MODE: ${{ github.event.inputs.mode || (github.event.schedule == '30 21 * * *' && 'update' || 'scan') }}
         run: python main.py
 
-      - name: Save new results
+      - name: Save new files
         if: success()
         run: |
           git config user.name "bahis-bot"
           git config user.email "bot@local"
-          git add futbol_data/canli_eklenen.csv || true
-          git diff --cached --quiet || git commit -m "gun sonu sonuclar"
+          git add futbol_data/canli_eklenen.csv futbol_data/son_sinyaller.csv || true
+          git diff --cached --quiet || git commit -m "gun sonu sonuclar ve sinyaller"
           git push || true
