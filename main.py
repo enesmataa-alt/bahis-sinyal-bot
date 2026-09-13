@@ -115,7 +115,6 @@ def fetch_bulletin():
     today = datetime.now(TZ).date()
     tomorrow = today + timedelta(days=1)
     rows = []
-
     url = "https://www.football-data.co.uk/fixtures.csv"
     try:
         r = requests.get(url, timeout=30)
@@ -129,7 +128,6 @@ def fetch_bulletin():
                 rows.append(row.to_dict())
     except Exception as e:
         print("fixtures hata", e)
-
     print("bulten mac:", len(rows))
     return rows
 
@@ -182,6 +180,15 @@ def analyze_match(hist, h, d, a, o25):
     return mind, s30, s100, best, round(signals[best], 1)
 
 
+def fmt_odd(v):
+    try:
+        if v is None or (isinstance(v, float) and np.isnan(v)):
+            return "-"
+        return f"{float(v):.2f}"
+    except Exception:
+        return "-"
+
+
 def main():
     hist = load_local_history()
     if "FTR" in hist.columns:
@@ -216,16 +223,21 @@ def main():
         f"Bülten: {len(rows)} maç",
         f"Tarihsel data: {len(hist)} maç",
         "",
-        "<code>",
-        f"{'Maç':<26} Mesafe n30B n100B Sinyal",
-        "-" * 52,
     ]
-    for r in rows[:20]:
-        name = f"{r.get('HomeTeam','')} - {r.get('AwayTeam','')}"[:26]
+    for r in rows[:15]:
+        name = f"{r.get('HomeTeam','')} - {r.get('AwayTeam','')}"
+        n30 = r["n30"]
+        n100 = r["n100"]
+        lines.append(f"<b>{name}</b>")
         lines.append(
-            f"{name:<26} {r['mesafe']:<6} %{r['n30'][3]:<4} %{r['n100'][3]:<5} {r['best']} %{r['bestv']}"
+            f"1/X/2: {fmt_odd(r.get('H'))} / {fmt_odd(r.get('D'))} / {fmt_odd(r.get('A'))}   O2.5: {fmt_odd(r.get('O25'))}"
         )
-    lines.append("</code>\n")
+        lines.append(f"Mesafe: {r['mesafe']}")
+        lines.append(f"n30   H %{n30[0]} | A %{n30[1]} | O %{n30[2]} | BTTS %{n30[3]}")
+        lines.append(f"n100  H %{n100[0]} | A %{n100[1]} | O %{n100[2]} | BTTS %{n100[3]}")
+        lines.append(f"Sinyal: <b>{r['best']} %{r['bestv']}</b>")
+        lines.append("")
+
     lines.append("<b>En net 5 sinyal</b>")
     for i, r in enumerate(rows[:5], 1):
         lines.append(
