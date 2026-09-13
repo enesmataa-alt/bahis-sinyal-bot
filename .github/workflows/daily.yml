@@ -1,19 +1,26 @@
 name: Bahis Sinyal Bot
 
 on:
-  workflow_dispatch:   # Manuel çalıştırma
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "scan veya update"
+        required: false
+        default: scan
   schedule:
-    - cron: '0 9 * * *'   # Her gün 12:00 Türkiye saati (09:00 UTC)
+    - cron: '0 9 * * *'
+    - cron: '30 21 * * *'
+
+permissions:
+  contents: write
 
 jobs:
   run-analysis:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
@@ -26,4 +33,14 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          MODE: ${{ github.event.inputs.mode || (github.event.schedule == '30 21 * * *' && 'update' || 'scan') }}
         run: python main.py
+
+      - name: Save new results
+        if: success()
+        run: |
+          git config user.name "bahis-bot"
+          git config user.email "bot@local"
+          git add futbol_data/canli_eklenen.csv || true
+          git diff --cached --quiet || git commit -m "gun sonu sonuclar"
+          git push || true
