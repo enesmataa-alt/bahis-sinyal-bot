@@ -1,9 +1,9 @@
 name: Bahis Sinyal Bot
 
 on:
-  workflow_dispatch:   # Manuel çalıştırma (Telegram veya GitHub'dan)
+  workflow_dispatch:   # Manuel çalıştırma
   schedule:
-    - cron: '0 7 * * *'   # Her gün sabah 10:00 Türkiye saati (07:00 UTC)
+    - cron: '0 9 * * *'   # Her gün 12:00 Türkiye saati (09:00 UTC)
 
 jobs:
   run-analysis:
