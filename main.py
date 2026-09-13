@@ -96,8 +96,9 @@ def load_local_history():
                 n = normalize(raw)
             if not n.empty:
                 dfs.append(n)
-        except Exception:
-            pass
+        except Exception as e:
+            print("local skip", f, e)
+
     if not dfs:
         return pd.DataFrame(columns=["H", "D", "A", "O25", "FTR", "Over25", "BTTS"])
     return pd.concat(dfs, ignore_index=True)
@@ -141,6 +142,8 @@ def fetch_finished_current_season():
                 continue
             raw = pd.read_csv(pd.io.common.StringIO(r.text), low_memory=False)
             n = normalize(raw, code)
+            if n.empty:
+                continue
             n = n[n["FTR"].isin(["H", "D", "A"])]
             if not n.empty:
                 dfs.append(n)
@@ -155,17 +158,26 @@ def analyze_match(hist, h, d, a, o25):
     work = hist.dropna(subset=["H", "D", "A", "FTR"]).copy()
     if len(work) == 0:
         return 9.99, (0, 0, 0, 0), (0, 0, 0, 0), "Yok", 0
+
     if o25 is not None and not (isinstance(o25, float) and np.isnan(o25)):
         tmp = work.dropna(subset=["O25"])
         if len(tmp) >= 30:
             work = tmp
             work["mesafe"] = np.sqrt(
-                (work["H"] - h) ** 2 + (work["D"] - d) ** 2 + (work["A"] - a) ** 2 + (work["O25"] - o25) ** 2
+                (work["H"] - h) ** 2
+                + (work["D"] - d) ** 2
+                + (work["A"] - a) ** 2
+                + (work["O25"] - o25) ** 2
             )
         else:
-            work["mesafe"] = np.sqrt((work["H"] - h) ** 2 + (work["D"] - d) ** 2 + (work["A"] - a) ** 2)
+            work["mesafe"] = np.sqrt(
+                (work["H"] - h) ** 2 + (work["D"] - d) ** 2 + (work["A"] - a) ** 2
+            )
     else:
-        work["mesafe"] = np.sqrt((work["H"] - h) ** 2 + (work["D"] - d) ** 2 + (work["A"] - a) ** 2)
+        work["mesafe"] = np.sqrt(
+            (work["H"] - h) ** 2 + (work["D"] - d) ** 2 + (work["A"] - a) ** 2
+        )
+
     work = work.sort_values("mesafe")
 
     def stats(sub):
@@ -199,41 +211,38 @@ def fmt_odd(v):
         return "-"
 
 
-def signal_hit(best, row):
-    if best == "Home":
-        return str(row.get("FTR")) == "H"
-    if best == "Away":
-        return str(row.get("FTR")) == "A"
-    if best == "Over":
-        return float(row.get("Over25", 0) or 0) == 1
-    if best == "BTTS":
-        return float(row.get("BTTS", 0) or 0) == 1
-    return False
-
-
 def scan_signals(hist):
     today_matches = fetch_bulletin()
     if not today_matches:
-        send_telegram(f"✅ Tarihsel data: {len(hist)} maç.\n⚠️ fixtures.csv içinde bugün/yarın maçı yok.")
+        send_telegram(
+            f"✅ Tarihsel data: {len(hist)} maç.\n"
+            "⚠️ fixtures.csv içinde bugün/yarın maçı yok."
+        )
         return
 
     today = datetime.now(TZ).strftime("%d.%m.%Y")
     rows = []
     save_rows = []
     for m in today_matches:
-        mind, s30, s100, best, bestv = analyze_match(hist, m["H"], m["D"], m["A"], m.get("O25", np.nan))
-        rows.append({**m, "mesafe": mind, "n30": s30, "n100": s100, "best": best, "bestv": bestv})
+        mind, s30, s100, best, bestv = analyze_match(
+            hist, m["H"], m["D"], m["A"], m.get("O25", np.nan)
+        )
+        rec = {**m, "mesafe": mind, "n30": s30, "n100": s100, "best": best, "bestv": bestv}
+        rows.append(rec)
         save_rows.append({
             "Date": m.get("Date", ""),
             "HomeTeam": m.get("HomeTeam", ""),
             "AwayTeam": m.get("AwayTeam", ""),
-            "H": m.get("H"),
-            "D": m.get("D"),
-            "A": m.get("A"),
-            "O25": m.get("O25"),
+            "H": m.get("H", ""),
+            "D": m.get("D", ""),
+            "A": m.get("A", ""),
+            "O25": m.get("O25", ""),
+            "mesafe": mind,
             "best": best,
             "bestv": bestv,
-            "mesafe": mind,
+            "n30H": s30[0], "n30A": s30[1], "n30O": s30[2], "n30B": s30[3],
+            "n100H": s100[0], "n100A": s100[1], "n100O": s100[2], "n100B": s100[3],
+            "rapor_tarihi": today,
         })
     rows = sorted(rows, key=lambda x: x["mesafe"])
 
@@ -247,91 +256,104 @@ def scan_signals(hist):
         "",
     ]
     for r in rows[:15]:
-        n30, n100 = r["n30"], r["n100"]
-        lines.append(f"<b>{r.get('HomeTeam','')} - {r.get('AwayTeam','')}</b>")
-        lines.append(f"1/X/2: {fmt_odd(r.get('H'))} / {fmt_odd(r.get('D'))} / {fmt_odd(r.get('A'))}   O2.5: {fmt_odd(r.get('O25'))}")
+        name = f"{r.get('HomeTeam','')} - {r.get('AwayTeam','')}"
+        n30 = r["n30"]
+        n100 = r["n100"]
+        lines.append(f"<b>{name}</b>")
+        lines.append(
+            f"1/X/2: {fmt_odd(r.get('H'))} / {fmt_odd(r.get('D'))} / {fmt_odd(r.get('A'))}   O2.5: {fmt_odd(r.get('O25'))}"
+        )
         lines.append(f"Mesafe: {r['mesafe']}")
         lines.append(f"n30   H %{n30[0]} | A %{n30[1]} | O %{n30[2]} | BTTS %{n30[3]}")
         lines.append(f"n100  H %{n100[0]} | A %{n100[1]} | O %{n100[2]} | BTTS %{n100[3]}")
         lines.append(f"Sinyal: <b>{r['best']} %{r['bestv']}</b>")
         lines.append("")
+
     lines.append("<b>En net 5 sinyal</b>")
     for i, r in enumerate(rows[:5], 1):
-        lines.append(f"{i}. {r.get('HomeTeam','')} - {r.get('AwayTeam','')} → <b>{r['best']} %{r['bestv']}</b> (mesafe {r['mesafe']})")
+        lines.append(
+            f"{i}. {r.get('HomeTeam','')} - {r.get('AwayTeam','')} → <b>{r['best']} %{r['bestv']}</b> (mesafe {r['mesafe']})"
+        )
     send_telegram("\n".join(lines))
 
 
-def update_results(hist):
-    now = datetime.now(TZ)
-    hedef = now.date() - timedelta(days=1) if now.hour < 6 else now.date()
-    yeni = fetch_finished_current_season()
+def signal_hit(best, row):
+    best = str(best).upper()
+    ftr = str(row.get("FTR", "")).upper()
+    over = row.get("Over25", np.nan)
+    btts = row.get("BTTS", np.nan)
+    if best == "HOME":
+        return ftr == "H"
+    if best == "AWAY":
+        return ftr == "A"
+    if best == "OVER":
+        return float(over) == 1.0
+    if best == "BTTS":
+        return float(btts) == 1.0
+    return False
 
+
+def update_and_review():
+    yeni = fetch_finished_current_season()
     os.makedirs("futbol_data", exist_ok=True)
-    if yeni.empty:
-        send_telegram("⚠️ Gün sonu: bitmiş maç bulunamadı.")
+    if not yeni.empty:
+        if os.path.exists(RESULTS_FILE):
+            eski = pd.read_csv(RESULTS_FILE, low_memory=False)
+            hepsi = pd.concat([eski, yeni], ignore_index=True)
+        else:
+            hepsi = yeni
+        hepsi = hepsi.drop_duplicates(subset=["Date", "HomeTeam", "AwayTeam"], keep="last")
+        hepsi.to_csv(RESULTS_FILE, index=False)
+        toplam = len(hepsi)
+    else:
+        toplam = 0
+        yeni = pd.DataFrame()
+
+    lines = [f"<b>📌 {datetime.now(TZ).strftime('%d.%m.%Y')} Gün Sonu Raporu</b>"]
+    lines.append(f"Dataya işlenen bitmiş maç: {toplam}")
+    lines.append("")
+
+    if not os.path.exists(SIGNALS_FILE):
+        lines.append("Sabah sinyal dosyası yok. Önce scan çalışmalı.")
+        send_telegram("\n".join(lines))
         return
 
-    if os.path.exists(RESULTS_FILE):
-        eski = pd.read_csv(RESULTS_FILE, low_memory=False)
-        hepsi = pd.concat([eski, yeni], ignore_index=True)
-    else:
-        hepsi = yeni
-    hepsi = hepsi.drop_duplicates(subset=["Date", "HomeTeam", "AwayTeam"], keep="last")
-    hepsi.to_csv(RESULTS_FILE, index=False)
+    sig = pd.read_csv(SIGNALS_FILE, low_memory=False)
+    if sig.empty or yeni.empty:
+        lines.append("Sinyal veya sonuç henüz eşleşmedi. Kaynak gece geç güncellenebilir.")
+        send_telegram("\n".join(lines))
+        return
 
-    gun = []
-    for _, row in yeni.iterrows():
-        dt = parse_date(row.get("Date", ""))
-        if dt == hedef:
-            gun.append(row)
+    tutan = 0
+    toplam_sig = 0
+    bekleyen = 0
+    lines.append("<b>Sabah sinyalleri vs sonuç</b>")
+    for _, s in sig.iterrows():
+        home = str(s.get("HomeTeam", "")).strip()
+        away = str(s.get("AwayTeam", "")).strip()
+        hit_rows = yeni[
+            (yeni["HomeTeam"].astype(str).str.strip() == home)
+            & (yeni["AwayTeam"].astype(str).str.strip() == away)
+        ]
+        if hit_rows.empty:
+            bekleyen += 1
+            lines.append(f"⏳ {home} - {away} → {s.get('best')} henüz sonuç yok")
+            continue
+        row = hit_rows.iloc[0]
+        skor = f"{int(row.get('FTHG', 0)) if pd.notna(row.get('FTHG', np.nan)) else '?'} - {int(row.get('FTAG', 0)) if pd.notna(row.get('FTAG', np.nan)) else '?'}"
+        ok = signal_hit(s.get("best"), row)
+        toplam_sig += 1
+        if ok:
+            tutan += 1
+            lines.append(f"✅ {home} - {away}  {skor} → {s.get('best')} TUTTU")
+        else:
+            lines.append(f"❌ {home} - {away}  {skor} → {s.get('best')} TUTMADI")
 
-    sinyaller = pd.DataFrame()
-    if os.path.exists(SIGNALS_FILE):
-        sinyaller = pd.read_csv(SIGNALS_FILE)
-
-    lines = [
-        f"<b>📌 {hedef.strftime('%d.%m.%Y')} Gün Sonu Raporu</b>",
-        f"Dataya eklenen toplam bitmiş maç: {len(hepsi)}",
-        f"Bu güne ait biten maç: {len(gun)}",
-        "",
-    ]
-
-    hits = 0
-    total = 0
-    for row in gun:
-        home = str(row.get("HomeTeam", ""))
-        away = str(row.get("AwayTeam", ""))
-        skor = f"{int(row.get('FTHG', 0) if pd.notna(row.get('FTHG')) else 0)}-{int(row.get('FTAG', 0) if pd.notna(row.get('FTAG')) else 0)}"
-        ftr = row.get("FTR", "")
-        best, bestv, mesafe = None, None, None
-
-        if not sinyaller.empty:
-            m = sinyaller[
-                (sinyaller["HomeTeam"].astype(str) == home) &
-                (sinyaller["AwayTeam"].astype(str) == away)
-            ]
-            if len(m):
-                best = str(m.iloc[0]["best"])
-                bestv = m.iloc[0]["bestv"]
-                mesafe = m.iloc[0]["mesafe"]
-
-        if best is None:
-            mind, s30, s100, best, bestv = analyze_match(hist, row["H"], row["D"], row["A"], row.get("O25", np.nan))
-            mesafe = mind
-
-        ok = signal_hit(best, row)
-        total += 1
-        hits += 1 if ok else 0
-        durum = "✅ Tuttu" if ok else "❌ Tutmadı"
-        lines.append(f"<b>{home} - {away}</b>  {skor} ({ftr})")
-        lines.append(f"Sinyal: {best} %{bestv} | Mesafe: {mesafe} | {durum}")
-        lines.append("")
-
-    if total:
-        oran = round(hits / total * 100, 1)
-        lines.append(f"<b>Özet:</b> {hits}/{total} sinyal tuttu (%{oran})")
-    else:
-        lines.append("Bu tarih için eşleşen bitmiş maç henüz yok. Kaynak gece geç güncellenebilir.")
+    lines.append("")
+    if toplam_sig:
+        oran = round(100 * tutan / toplam_sig, 1)
+        lines.append(f"<b>Özet:</b> {tutan}/{toplam_sig} tuttu (%{oran})")
+    lines.append(f"Sonuç bekleyen: {bekleyen}")
     send_telegram("\n".join(lines))
 
 
@@ -347,7 +369,7 @@ def main():
         return
 
     if mode == "update":
-        update_results(hist)
+        update_and_review()
     else:
         scan_signals(hist)
 
