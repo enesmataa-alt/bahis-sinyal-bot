@@ -1,5 +1,7 @@
 import os
 import glob
+import zipfile
+import tempfile
 import traceback
 from datetime import datetime, timezone, timedelta
 import numpy as np
@@ -69,20 +71,44 @@ def normalize(df, league_code=""):
 
 
 def load_local_history():
-    files = glob.glob("futbol_data/*.csv") + glob.glob("futbol_data/**/*.csv", recursive=True)
-    print("csv sayisi:", len(files))
+    files = []
+    files += glob.glob("futbol_data/*.csv")
+    files += glob.glob("futbol_data/**/*.csv", recursive=True)
+    files += glob.glob("*.csv")
+
+    zip_files = glob.glob("futbol_data/*.zip") + glob.glob("futbol_data/**/*.zip", recursive=True)
+    print("csv:", len(files), "zip:", len(zip_files))
+
+    tmpdir = tempfile.mkdtemp()
+    for zpath in zip_files:
+        try:
+            with zipfile.ZipFile(zpath, "r") as zf:
+                zf.extractall(tmpdir)
+        except Exception as e:
+            print("zip acilamadi", zpath, e)
+
+    files += glob.glob(tmpdir + "/*.csv")
+    files += glob.glob(tmpdir + "/**/*.csv", recursive=True)
+    print("toplam csv:", len(files))
+
     dfs = []
     for f in files:
         try:
             raw = pd.read_csv(f, low_memory=False, encoding="utf-8", on_bad_lines="skip")
             n = normalize(raw)
+            if n.empty:
+                raw = pd.read_csv(f, low_memory=False, encoding="latin-1", on_bad_lines="skip")
+                n = normalize(raw)
             if not n.empty:
                 dfs.append(n)
         except Exception as e:
             print("local skip", f, e)
+
     if not dfs:
         return pd.DataFrame(columns=["H", "D", "A", "O25", "FTR", "Over25", "BTTS"])
-    return pd.concat(dfs, ignore_index=True)
+    out = pd.concat(dfs, ignore_index=True)
+    print("yuklenen mac:", len(out))
+    return out
 
 
 def parse_date(s):
@@ -184,8 +210,8 @@ def main():
 
     if not today_matches:
         send_telegram(
-            f"⚠️ Bugün/yarın için henüz oranlı oynanmamış maç yok.\n"
-            f"Tarihsel data hazır: {len(hist)} maç."
+            f"✅ Tarihsel data yüklendi: {len(hist)} maç.\n"
+            "⚠️ Bugün/yarın için henüz oranlı oynanmamış maç yok."
         )
         return
 
