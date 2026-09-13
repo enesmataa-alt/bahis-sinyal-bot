@@ -1,160 +1,232 @@
 import os
-import pandas as pd
+import glob
+import io
+from datetime import datetime, timezone, timedelta
 import numpy as np
-from datetime import datetime
+import pandas as pd
+import requests
 from telegram import Bot
 import asyncio
-import glob
 
-# ================== AYARLAR ==================
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# ================== TELEGRAM ==================
+SEASON = "2627"
+BASE = f"https://www.football-data.co.uk/mmz4281/{SEASON}"
+
+LEAGUES = {
+    "E0": "ENG Premier",
+    "E1": "ENG Championship",
+    "E2": "ENG League One",
+    "E3": "ENG League Two",
+    "D1": "GER Bundesliga",
+    "D2": "GER 2. Bundesliga",
+    "I1": "ITA Serie A",
+    "I2": "ITA Serie B",
+    "SP1": "ESP La Liga",
+    "SP2": "ESP Segunda",
+    "F1": "FRA Ligue 1",
+    "F2": "FRA Ligue 2",
+    "N1": "NED Eredivisie",
+    "B1": "BEL Pro League",
+    "P1": "POR Liga",
+    "T1": "TUR Super Lig",
+    "SC0": "SCO Premiership",
+    "G1": "GRE Super League",
+}
+
+TZ = timezone(timedelta(hours=3))
+
+
 def send_telegram(message: str):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        print("Telegram ayarları eksik")
+        print("Telegram ayarlari eksik")
         return
     bot = Bot(token=TELEGRAM_TOKEN)
-    asyncio.run(bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message, parse_mode="HTML"))
+    chunks = [message[i:i + 4000] for i in range(0, len(message), 4000)]
+    for c in chunks:
+        asyncio.run(bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=c, parse_mode="HTML"))
 
-# ================== DATA YÜKLEME ==================
-def load_all_data():
-    """futbol_data klasöründeki tüm CSV'leri birleştirir"""
+
+def pick_col(df, names):
+    for n in names:
+        if n in df.columns:
+            return n
+    return None
+
+
+def normalize(df, league_code=""):
+    h = pick_col(df, ["B365H", "AvgH", "PSH", "WHH", "IWH"])
+    d = pick_col(df, ["B365D", "AvgD", "PSD", "WHD", "IWD"])
+    a = pick_col(df, ["B365A", "AvgA", "PSA", "WHA", "IWA"])
+    o = pick_col(df, ["B365>2.5", "Avg>2.5", "P>2.5"])
+    if not all([h, d, a]):
+        return pd.DataFrame()
+
+    out = pd.DataFrame()
+    out["H"] = pd.to_numeric(df[h], errors="coerce")
+    out["D"] = pd.to_numeric(df[d], errors="coerce")
+    out["A"] = pd.to_numeric(df[a], errors="coerce")
+    out["O25"] = pd.to_numeric(df[o], errors="coerce") if o else np.nan
+    out["FTR"] = df["FTR"] if "FTR" in df.columns else np.nan
+
+    if "FTHG" in df.columns and "FTAG" in df.columns:
+        hg = pd.to_numeric(df["FTHG"], errors="coerce")
+        ag = pd.to_numeric(df["FTAG"], errors="coerce")
+        out["Over25"] = ((hg + ag) > 2.5).astype(float)
+        out["BTTS"] = ((hg > 0) & (ag > 0)).astype(float)
+    else:
+        out["Over25"] = np.nan
+        out["BTTS"] = np.nan
+
+    out["HomeTeam"] = df["HomeTeam"] if "HomeTeam" in df.columns else ""
+    out["AwayTeam"] = df["AwayTeam"] if "AwayTeam" in df.columns else ""
+    out["Date"] = df["Date"] if "Date" in df.columns else ""
+    out["League"] = league_code
+    return out
+
+
+def load_local_history():
     files = glob.glob("futbol_data/*.csv") + glob.glob("futbol_data/**/*.csv", recursive=True)
-    
-    if not files:
-        print("Hiç CSV bulunamadı!")
-        return None
-    
     dfs = []
     for f in files:
         try:
-            df = pd.read_csv(f, low_memory=False)
-            # Gerekli kolonları standartlaştır
-            if 'B365H' in df.columns:
-                df = df.rename(columns={
-                    'B365H': 'H',
-                    'B365D': 'D',
-                    'B365A': 'A',
-                    'B365>2.5': 'O25'
-                })
-            # FTR, FTHG, FTAG varsa BTTS ve Over hesapla
-            if 'FTHG' in df.columns and 'FTAG' in df.columns:
-                df['BTTS'] = ((df['FTHG'] > 0) & (df['FTAG'] > 0)).astype(int)
-                df['Over25'] = ((df['FTHG'] + df['FTAG']) > 2.5).astype(int)
-            
-            # Sadece ihtiyacımız olan kolonları al
-            needed = ['H', 'D', 'A', 'O25', 'FTR', 'Over25', 'BTTS']
-            available = [c for c in needed if c in df.columns]
-            if len(available) >= 4:
-                dfs.append(df[available].dropna())
+            raw = pd.read_csv(f, low_memory=False)
+            n = normalize(raw)
+            if not n.empty:
+                dfs.append(n)
         except Exception as e:
-            print(f"Hata {f}: {e}")
-            continue
-    
-    if not dfs:
-        return None
-    
-    full_df = pd.concat(dfs, ignore_index=True)
-    print(f"Toplam {len(full_df)} maç yüklendi.")
-    return full_df
+            print("local skip", f, e)
+    return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
 
-# ================== ANALİZ ==================
-def analyze_match(df, h, d, a, o25, n30=30, n100=100):
-    df = df.copy()
-    df["mesafe"] = np.sqrt(
-        (df["H"] - h)**2 +
-        (df["D"] - d)**2 +
-        (df["A"] - a)**2 +
-        (df["O25"] - o25)**2
-    )
-    df = df.sort_values("mesafe")
-    
-    def get_stats(subset):
-        total = len(subset)
-        if total == 0:
+
+def fetch_today_bulletin():
+    """Sadece güncel sezon dosyalarından BUGÜNÜN henüz bitmemiş maçlarını alır."""
+    today = datetime.now(TZ).date()
+    rows = []
+    for code, name in LEAGUES.items():
+        url = f"{BASE}/{code}.csv"
+        try:
+            r = requests.get(url, timeout=20)
+            if r.status_code != 200 or not r.text.strip():
+                continue
+            raw = pd.read_csv(io.StringIO(r.text), low_memory=False)
+            n = normalize(raw, name)
+            if n.empty:
+                continue
+            for _, row in n.iterrows():
+                dt = parse_date(row.get("Date", ""))
+                finished = str(row.get("FTR", "")).strip() in ["H", "D", "A"]
+                if dt == today and not finished and pd.notna(row["H"]):
+                    rows.append(row.to_dict())
+        except Exception as e:
+            print("bulletin hata", code, e)
+    return rows
+
+
+def parse_date(s):
+    for fmt in ("%d/%m/%Y", "%d/%m/%y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(str(s).strip(), fmt).date()
+        except Exception:
+            pass
+    return None
+
+
+def analyze_match(hist, h, d, a, o25, n30=30, n100=100):
+    work = hist.dropna(subset=["H", "D", "A", "FTR"]).copy()
+    if o25 is not None and not (isinstance(o25, float) and np.isnan(o25)):
+        work = work.dropna(subset=["O25"])
+        work["mesafe"] = np.sqrt(
+            (work["H"] - h) ** 2
+            + (work["D"] - d) ** 2
+            + (work["A"] - a) ** 2
+            + (work["O25"] - o25) ** 2
+        )
+    else:
+        work["mesafe"] = np.sqrt(
+            (work["H"] - h) ** 2 + (work["D"] - d) ** 2 + (work["A"] - a) ** 2
+        )
+    work = work.sort_values("mesafe")
+
+    def stats(sub):
+        if len(sub) == 0:
             return 0, 0, 0, 0
-        home = (subset["FTR"] == "H").mean() * 100
-        away = (subset["FTR"] == "A").mean() * 100
-        over = subset["Over25"].mean() * 100 if "Over25" in subset else 0
-        btts = subset["BTTS"].mean() * 100 if "BTTS" in subset else 0
-        return round(home,1), round(away,1), round(over,1), round(btts,1)
-    
-    n30_stats = get_stats(df.head(n30))
-    n100_stats = get_stats(df.head(n100))
-    min_dist = round(df["mesafe"].iloc[0], 3)
-    
+        home = (sub["FTR"] == "H").mean() * 100
+        away = (sub["FTR"] == "A").mean() * 100
+        over = sub["Over25"].mean() * 100 if "Over25" in sub else 0
+        btts = sub["BTTS"].mean() * 100 if "BTTS" in sub else 0
+        return round(home, 1), round(away, 1), round(float(over or 0), 1), round(float(btts or 0), 1)
+
+    s30 = stats(work.head(n30))
+    s100 = stats(work.head(min(n100, len(work))))
+    mind = round(float(work["mesafe"].iloc[0]), 3) if len(work) else 9.99
     signals = {
-        "Home": (n30_stats[0] + n100_stats[0]) / 2,
-        "Away": (n30_stats[1] + n100_stats[1]) / 2,
-        "Over": (n30_stats[2] + n100_stats[2]) / 2,
-        "BTTS": (n30_stats[3] + n100_stats[3]) / 2
+        "Home": (s30[0] + s100[0]) / 2,
+        "Away": (s30[1] + s100[1]) / 2,
+        "Over": (s30[2] + s100[2]) / 2,
+        "BTTS": (s30[3] + s100[3]) / 2,
     }
     best = max(signals, key=signals.get)
-    
-    return {
-        "mesafe": min_dist,
-        "n30": n30_stats,
-        "n100": n100_stats,
-        "best": best,
-        "best_val": round(signals[best], 1)
-    }
+    return mind, s30, s100, best, round(signals[best], 1)
 
-# ================== ÖRNEK BÜLTEN (şimdilik sabit) ==================
-TODAY_MATCHES = [
-    {"name": "Man United - Man City", "H": 3.10, "D": 3.60, "A": 2.20, "O25": 1.70},
-    {"name": "Sheffield Utd - Wolves", "H": 3.40, "D": 3.40, "A": 2.10, "O25": 1.85},
-    {"name": "Coventry - Brighton", "H": 3.80, "D": 3.60, "A": 1.95, "O25": 1.80},
-    {"name": "Galatasaray - Kocaelispor", "H": 1.35, "D": 5.00, "A": 8.50, "O25": 1.45},
-    {"name": "Lecce - Monza", "H": 2.40, "D": 3.20, "A": 3.00, "O25": 1.90},
-]
 
-def create_report(df):
-    today = datetime.now().strftime("%d.%m.%Y")
-    results = []
-    
-    for m in TODAY_MATCHES:
-        res = analyze_match(df, m["H"], m["D"], m["A"], m["O25"])
-        results.append({
-            "name": m["name"],
-            **res
-        })
-    
-    results = sorted(results, key=lambda x: x["mesafe"])
-    
-    lines = [f"<b>📊 {today} – Bahis Sinyal Raporu</b>\n"]
-    lines.append("<code>")
-    lines.append(f"{'Maç':<28} | Mesafe | n30 BTTS | n100 BTTS | Sinyal")
-    lines.append("-"*70)
-    
-    for r in results:
-        line = f"{r['name']:<28} | {r['mesafe']:<6} | %{r['n30'][3]:<7} | %{r['n100'][3]:<8} | {r['best']} %{r['best_val']}"
-        lines.append(line)
-    
-    lines.append("</code>\n")
-    lines.append("<b>En Net 3 Sinyal:</b>")
-    for i, r in enumerate(results[:3], 1):
-        lines.append(f"{i}. {r['name']} → <b>{r['best']} %{r['best_val']}</b>")
-    
+def build_report(hist, today_matches):
+    today = datetime.now(TZ).strftime("%d.%m.%Y")
+    rows = []
+    for m in today_matches:
+        mind, s30, s100, best, bestv = analyze_match(
+            hist, m["H"], m["D"], m["A"], m.get("O25", np.nan)
+        )
+        rows.append({**m, "mesafe": mind, "n30": s30, "n100": s100, "best": best, "bestv": bestv})
+    rows = sorted(rows, key=lambda x: x["mesafe"])
+
+    lines = [
+        f"<b>📊 {today} Otomatik Sinyal</b>",
+        f"Bugünkü bülten: {len(rows)} maç",
+        f"Karşılaştırılan tarihsel data: {len(hist)} maç",
+        "",
+        "<code>",
+        f"{'Maç':<26} Mesafe n30B n100B Sinyal",
+        "-" * 52,
+    ]
+    for r in rows[:20]:
+        name = f"{r['HomeTeam']} - {r['AwayTeam']}"[:26]
+        lines.append(
+            f"{name:<26} {r['mesafe']:<6} %{r['n30'][3]:<4} %{r['n100'][3]:<5} {r['best']} %{r['bestv']}"
+        )
+    lines.append("</code>")
+    lines.append("")
+    lines.append("<b>En net 5 sinyal</b>")
+    for i, r in enumerate(rows[:5], 1):
+        lines.append(
+            f"{i}. {r['HomeTeam']} - {r['AwayTeam']} → <b>{r['best']} %{r['bestv']}</b> (mesafe {r['mesafe']})"
+        )
     return "\n".join(lines)
 
-# ================== ANA ==================
+
 def main():
-    print("Sistem başlatıldı...")
-    df = load_all_data()
-    
-    if df is None or len(df) < 100:
-        send_telegram("❌ Yeterli data yüklenemedi. futbol_data klasörünü kontrol et.")
+    hist = load_local_history()
+    hist = hist[hist["FTR"].isin(["H", "D", "A"])].copy()
+    print("tarihsel maç:", len(hist))
+
+    today_matches = fetch_today_bulletin()
+    print("bugunku mac:", len(today_matches))
+
+    if hist.empty:
+        send_telegram("❌ Tarihsel data okunamadı. futbol_data klasörünü kontrol et.")
         return
-    
-    try:
-        message = create_report(df)
-        send_telegram(message)
-        print("Rapor gönderildi.")
-    except Exception as e:
-        send_telegram(f"❌ Hata: {str(e)}")
-        print(e)
+
+    if not today_matches:
+        send_telegram(
+            f"⚠️ Bugün için henüz oranlı/oynanmamış maç bulunamadı.\n"
+            f"Tarihsel data hazır: {len(hist)} maç."
+        )
+        return
+
+    msg = build_report(hist, today_matches)
+    send_telegram(msg)
+
 
 if __name__ == "__main__":
     main()
