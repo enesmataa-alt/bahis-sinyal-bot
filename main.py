@@ -11,6 +11,9 @@ import requests
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 TZ = timezone(timedelta(hours=3))
+SEASON = "2627"
+LEAGUES = ["E0", "E1", "E2", "E3", "D1", "D2", "I1", "I2", "SP1", "SP2", "F1", "F2", "N1", "B1", "P1", "T1", "SC0", "G1"]
+RESULTS_FILE = "futbol_data/canli_eklenen.csv"
 
 
 def send_telegram(message: str):
@@ -55,6 +58,8 @@ def normalize(df, league_code=""):
         ag = pd.to_numeric(df["FTAG"], errors="coerce")
         out["Over25"] = ((hg + ag) > 2.5).astype(float)
         out["BTTS"] = ((hg > 0) & (ag > 0)).astype(float)
+        out["FTHG"] = hg
+        out["FTAG"] = ag
     else:
         out["Over25"] = np.nan
         out["BTTS"] = np.nan
@@ -128,8 +133,49 @@ def fetch_bulletin():
                 rows.append(row.to_dict())
     except Exception as e:
         print("fixtures hata", e)
-    print("bulten mac:", len(rows))
     return rows
+
+
+def fetch_finished_current_season():
+    dfs = []
+    for code in LEAGUES:
+        url = f"https://www.football-data.co.uk/mmz4281/{SEASON}/{code}.csv"
+        try:
+            r = requests.get(url, timeout=20)
+            if r.status_code != 200 or not r.text.strip():
+                continue
+            raw = pd.read_csv(pd.io.common.StringIO(r.text), low_memory=False)
+            n = normalize(raw, code)
+            if n.empty:
+                continue
+            n = n[n["FTR"].isin(["H", "D", "A"])]
+            if not n.empty:
+                dfs.append(n)
+        except Exception as e:
+            print("sonuc hata", code, e)
+    if not dfs:
+        return pd.DataFrame()
+    return pd.concat(dfs, ignore_index=True)
+
+
+def update_results():
+    yeni = fetch_finished_current_season()
+    if yeni.empty:
+        send_telegram("⚠️ Gün sonu: eklenecek bitmiş maç bulunamadı.")
+        return 0
+
+    os.makedirs("futbol_data", exist_ok=True)
+    if os.path.exists(RESULTS_FILE):
+        eski = pd.read_csv(RESULTS_FILE, low_memory=False)
+        hepsi = pd.concat([eski, yeni], ignore_index=True)
+    else:
+        hepsi = yeni
+
+    hepsi = hepsi.drop_duplicates(subset=["Date", "HomeTeam", "AwayTeam"], keep="last")
+    hepsi.to_csv(RESULTS_FILE, index=False)
+    print("kayitli sonuc:", len(hepsi))
+    send_telegram(f"✅ Gün sonu data güncellendi.\nKayıtlı bitmiş maç: {len(hepsi)}")
+    return len(hepsi)
 
 
 def analyze_match(hist, h, d, a, o25):
@@ -189,22 +235,11 @@ def fmt_odd(v):
         return "-"
 
 
-def main():
-    hist = load_local_history()
-    if "FTR" in hist.columns:
-        hist = hist[hist["FTR"].isin(["H", "D", "A"])].copy()
-    print("tarihsel mac:", len(hist))
-
+def scan_signals(hist):
     today_matches = fetch_bulletin()
-    print("bulten mac:", len(today_matches))
-
-    if hist.empty:
-        send_telegram("❌ Tarihsel data okunamadı.")
-        return
-
     if not today_matches:
         send_telegram(
-            f"✅ Tarihsel data yüklendi: {len(hist)} maç.\n"
+            f"✅ Tarihsel data: {len(hist)} maç.\n"
             "⚠️ fixtures.csv içinde bugün/yarın maçı yok."
         )
         return
@@ -244,6 +279,23 @@ def main():
             f"{i}. {r.get('HomeTeam','')} - {r.get('AwayTeam','')} → <b>{r['best']} %{r['bestv']}</b> (mesafe {r['mesafe']})"
         )
     send_telegram("\n".join(lines))
+
+
+def main():
+    mode = os.getenv("MODE", "scan")
+    hist = load_local_history()
+    if "FTR" in hist.columns:
+        hist = hist[hist["FTR"].isin(["H", "D", "A"])].copy()
+    print("tarihsel mac:", len(hist), "mode:", mode)
+
+    if hist.empty:
+        send_telegram("❌ Tarihsel data okunamadı.")
+        return
+
+    if mode == "update":
+        update_results()
+    else:
+        scan_signals(hist)
 
 
 if __name__ == "__main__":
