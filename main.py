@@ -22,11 +22,7 @@ def send_telegram(message: str):
         chunk = message[i:i + 3900]
         r = requests.post(
             url,
-            data={
-                "chat_id": TELEGRAM_CHAT_ID,
-                "text": chunk,
-                "parse_mode": "HTML",
-            },
+            data={"chat_id": TELEGRAM_CHAT_ID, "text": chunk, "parse_mode": "HTML"},
             timeout=20,
         )
         print("telegram", r.status_code, r.text[:200])
@@ -66,16 +62,12 @@ def normalize(df, league_code=""):
     out["HomeTeam"] = df["HomeTeam"] if "HomeTeam" in df.columns else ""
     out["AwayTeam"] = df["AwayTeam"] if "AwayTeam" in df.columns else ""
     out["Date"] = df["Date"] if "Date" in df.columns else ""
-    out["League"] = league_code
+    out["League"] = league_code if league_code else (df["Div"] if "Div" in df.columns else "")
     return out
 
 
 def load_local_history():
-    files = []
-    files += glob.glob("futbol_data/*.csv")
-    files += glob.glob("futbol_data/**/*.csv", recursive=True)
-    files += glob.glob("*.csv")
-
+    files = glob.glob("futbol_data/*.csv") + glob.glob("futbol_data/**/*.csv", recursive=True) + glob.glob("*.csv")
     zip_files = glob.glob("futbol_data/*.zip") + glob.glob("futbol_data/**/*.zip", recursive=True)
     print("csv:", len(files), "zip:", len(zip_files))
 
@@ -87,8 +79,7 @@ def load_local_history():
         except Exception as e:
             print("zip acilamadi", zpath, e)
 
-    files += glob.glob(tmpdir + "/*.csv")
-    files += glob.glob(tmpdir + "/**/*.csv", recursive=True)
+    files += glob.glob(tmpdir + "/*.csv") + glob.glob(tmpdir + "/**/*.csv", recursive=True)
     print("toplam csv:", len(files))
 
     dfs = []
@@ -121,29 +112,25 @@ def parse_date(s):
 
 
 def fetch_bulletin():
-    season = "2627"
-    leagues = ["E0", "E1", "E2", "E3", "D1", "D2", "I1", "I2", "SP1", "SP2", "F1", "F2", "N1", "B1", "P1", "T1", "SC0", "G1"]
     today = datetime.now(TZ).date()
     tomorrow = today + timedelta(days=1)
     rows = []
-    for code in leagues:
-        url = f"https://www.football-data.co.uk/mmz4281/{season}/{code}.csv"
-        try:
-            r = requests.get(url, timeout=20)
-            if r.status_code != 200 or not r.text.strip():
-                print("yok", code, r.status_code)
-                continue
-            raw = pd.read_csv(pd.io.common.StringIO(r.text), low_memory=False)
-            n = normalize(raw, code)
-            if n.empty:
-                continue
-            for _, row in n.iterrows():
-                dt = parse_date(row.get("Date", ""))
-                finished = str(row.get("FTR", "")).strip() in ["H", "D", "A"]
-                if dt in (today, tomorrow) and not finished and pd.notna(row["H"]):
-                    rows.append(row.to_dict())
-        except Exception as e:
-            print("bulletin hata", code, e)
+
+    url = "https://www.football-data.co.uk/fixtures.csv"
+    try:
+        r = requests.get(url, timeout=30)
+        r.raise_for_status()
+        raw = pd.read_csv(pd.io.common.StringIO(r.text), low_memory=False)
+        n = normalize(raw)
+        print("fixtures satir:", len(n))
+        for _, row in n.iterrows():
+            dt = parse_date(row.get("Date", ""))
+            if dt in (today, tomorrow) and pd.notna(row["H"]):
+                rows.append(row.to_dict())
+    except Exception as e:
+        print("fixtures hata", e)
+
+    print("bulten mac:", len(rows))
     return rows
 
 
@@ -205,13 +192,13 @@ def main():
     print("bulten mac:", len(today_matches))
 
     if hist.empty:
-        send_telegram("❌ Tarihsel data okunamadı. futbol_data klasörünü kontrol et.")
+        send_telegram("❌ Tarihsel data okunamadı.")
         return
 
     if not today_matches:
         send_telegram(
             f"✅ Tarihsel data yüklendi: {len(hist)} maç.\n"
-            "⚠️ Bugün/yarın için henüz oranlı oynanmamış maç yok."
+            "⚠️ fixtures.csv içinde bugün/yarın maçı yok."
         )
         return
 
