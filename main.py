@@ -2,34 +2,59 @@ import os
 import glob
 import zipfile
 import tempfile
-import traceback
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 import numpy as np
 import pandas as pd
 import requests
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-TZ = timezone(timedelta(hours=3))
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+MODE = os.getenv("MODE", "scan").strip().lower()
+
 SEASON = "2627"
-LEAGUES = ["E0", "E1", "E2", "E3", "D1", "D2", "I1", "I2", "SP1", "SP2", "F1", "F2", "N1", "B1", "P1", "T1", "SC0", "G1"]
-RESULTS_FILE = "futbol_data/canli_eklenen.csv"
-SIGNALS_FILE = "futbol_data/son_sinyaller.csv"
+LEAGUES = [
+    "E0", "E1", "E2", "E3", "EC",
+    "D1", "D2",
+    "I1", "I2",
+    "SP1", "SP2",
+    "F1", "F2",
+    "N1",
+    "B1",
+    "P1",
+    "T1",
+    "SC0", "SC1", "SC2",
+    "G1",
+]
+
+DATA_DIR = "futbol_data"
+SIGNALS_FILE = os.path.join(DATA_DIR, "son_sinyaller.csv")
+LIVE_FILE = os.path.join(DATA_DIR, "canli_eklenen.csv")
+FIXTURES_URL = "https://www.football-data.co.uk/fixtures.csv"
+TR = ZoneInfo("Europe/Istanbul")
 
 
-def send_telegram(message: str):
+def today_str():
+    return datetime.now(TR).strftime("%d/%m/%Y")
+
+
+def send_telegram(text):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        print("Telegram ayarlari eksik")
+        print(text)
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    for i in range(0, len(message), 3900):
-        chunk = message[i:i + 3900]
-        r = requests.post(
+    for i in range(0, len(text), 3500):
+        chunk = text[i:i + 3500]
+        requests.post(
             url,
-            data={"chat_id": TELEGRAM_CHAT_ID, "text": chunk, "parse_mode": "HTML"},
-            timeout=20,
+            data={
+                "chat_id": TELEGRAM_CHAT_ID,
+                "text": chunk,
+                "parse_mode": "HTML",
+            },
+            timeout=30,
         )
-        print("telegram", r.status_code, r.text[:200])
 
 
 def pick_col(df, names):
@@ -39,346 +64,308 @@ def pick_col(df, names):
     return None
 
 
-def normalize(df, league_code=""):
-    h = pick_col(df, ["B365H", "AvgH", "PSH", "WHH", "IWH"])
-    d = pick_col(df, ["B365D", "AvgD", "PSD", "WHD", "IWD"])
-    a = pick_col(df, ["B365A", "AvgA", "PSA", "WHA", "IWA"])
-    o = pick_col(df, ["B365>2.5", "Avg>2.5", "P>2.5"])
-    if not all([h, d, a]):
-        return pd.DataFrame()
+def read_csv_flex(path):
+    for enc in ("utf-8", "latin-1", "cp1252"):
+        try:
+            return pd.read_csv(path, encoding=enc, low_memory=False)
+        except Exception:
+            continue
+    return None
 
-    out = pd.DataFrame()
-    out["H"] = pd.to_numeric(df[h], errors="coerce")
-    out["D"] = pd.to_numeric(df[d], errors="coerce")
-    out["A"] = pd.to_numeric(df[a], errors="coerce")
-    out["O25"] = pd.to_numeric(df[o], errors="coerce") if o else np.nan
-    out["FTR"] = df["FTR"] if "FTR" in df.columns else np.nan
 
-    if "FTHG" in df.columns and "FTAG" in df.columns:
-        hg = pd.to_numeric(df["FTHG"], errors="coerce")
-        ag = pd.to_numeric(df["FTAG"], errors="coerce")
-        out["Over25"] = ((hg + ag) > 2.5).astype(float)
-        out["BTTS"] = ((hg > 0) & (ag > 0)).astype(float)
-        out["FTHG"] = hg
-        out["FTAG"] = ag
-    else:
-        out["Over25"] = np.nan
-        out["BTTS"] = np.nan
-        out["FTHG"] = np.nan
-        out["FTAG"] = np.nan
-
-    out["HomeTeam"] = df["HomeTeam"] if "HomeTeam" in df.columns else ""
-    out["AwayTeam"] = df["AwayTeam"] if "AwayTeam" in df.columns else ""
-    out["Date"] = df["Date"] if "Date" in df.columns else ""
-    out["League"] = league_code if league_code else (df["Div"] if "Div" in df.columns else "")
+def standardize(df):
+    out = df.copy()
+    h = pick_col(out, ["B365H", "AvgH", "PSH", "BbAvH"])
+    d = pick_col(out, ["B365D", "AvgD", "PSD", "BbAvD"])
+    a = pick_col(out, ["B365A", "AvgA", "PSA", "BbAvA"])
+    o = pick_col(out, ["B365>2.5", "Avg>2.5", "P>2.5", "BbAv>2.5"])
+    out["H"] = pd.to_numeric(out[h], errors="coerce") if h else np.nan
+    out["D"] = pd.to_numeric(out[d], errors="coerce") if d else np.nan
+    out["A"] = pd.to_numeric(out[a], errors="coerce") if a else np.nan
+    out["O25"] = pd.to_numeric(out[o], errors="coerce") if o else np.nan
+    if "FTHG" in out.columns and "FTAG" in out.columns:
+        out["FTHG"] = pd.to_numeric(out["FTHG"], errors="coerce")
+        out["FTAG"] = pd.to_numeric(out["FTAG"], errors="coerce")
+        out["Over25"] = ((out["FTHG"] + out["FTAG"]) > 2.5).astype(float)
+        out["BTTS"] = ((out["FTHG"] > 0) & (out["FTAG"] > 0)).astype(float)
+    if "HomeTeam" not in out.columns and "Home" in out.columns:
+        out["HomeTeam"] = out["Home"]
+    if "AwayTeam" not in out.columns and "Away" in out.columns:
+        out["AwayTeam"] = out["Away"]
     return out
 
 
 def load_local_history():
-    files = glob.glob("futbol_data/*.csv") + glob.glob("futbol_data/**/*.csv", recursive=True) + glob.glob("*.csv")
-    zip_files = glob.glob("futbol_data/*.zip") + glob.glob("futbol_data/**/*.zip", recursive=True)
-    tmpdir = tempfile.mkdtemp()
-    for zpath in zip_files:
+    os.makedirs(DATA_DIR, exist_ok=True)
+    frames = []
+
+    for zpath in glob.glob(os.path.join(DATA_DIR, "**", "*.zip"), recursive=True):
         try:
-            with zipfile.ZipFile(zpath, "r") as zf:
-                zf.extractall(tmpdir)
-        except Exception as e:
-            print("zip acilamadi", zpath, e)
-    files += glob.glob(tmpdir + "/*.csv") + glob.glob(tmpdir + "/**/*.csv", recursive=True)
-
-    dfs = []
-    for f in files:
-        try:
-            raw = pd.read_csv(f, low_memory=False, encoding="utf-8", on_bad_lines="skip")
-            n = normalize(raw)
-            if n.empty:
-                raw = pd.read_csv(f, low_memory=False, encoding="latin-1", on_bad_lines="skip")
-                n = normalize(raw)
-            if not n.empty:
-                dfs.append(n)
-        except Exception as e:
-            print("local skip", f, e)
-
-    if not dfs:
-        return pd.DataFrame(columns=["H", "D", "A", "O25", "FTR", "Over25", "BTTS"])
-    return pd.concat(dfs, ignore_index=True)
-
-
-def parse_date(s):
-    for fmt in ("%d/%m/%Y", "%d/%m/%y", "%Y-%m-%d"):
-        try:
-            return datetime.strptime(str(s).strip(), fmt).date()
+            with zipfile.ZipFile(zpath) as zf:
+                tmp = tempfile.mkdtemp()
+                zf.extractall(tmp)
         except Exception:
-            pass
-    return None
+            continue
+
+    for path in glob.glob(os.path.join(DATA_DIR, "**", "*.csv"), recursive=True):
+        name = os.path.basename(path).lower()
+        if name in ("son_sinyaller.csv", "canli_eklenen.csv"):
+            continue
+        df = read_csv_flex(path)
+        if df is None or len(df) == 0:
+            continue
+        frames.append(standardize(df))
+
+    if not frames:
+        return pd.DataFrame()
+
+    hist = pd.concat(frames, ignore_index=True)
+    hist = hist.dropna(subset=["H", "D", "A", "FTR"])
+    hist = hist[hist["FTR"].isin(["H", "D", "A"])]
+    if "HomeTeam" in hist.columns and "AwayTeam" in hist.columns and "Date" in hist.columns:
+        hist = hist.drop_duplicates(subset=["Date", "HomeTeam", "AwayTeam"], keep="last")
+    return hist.reset_index(drop=True)
 
 
 def fetch_bulletin():
-    today = datetime.now(TZ).date()
-    tomorrow = today + timedelta(days=1)
-    rows = []
-    url = "https://www.football-data.co.uk/fixtures.csv"
-    try:
-        r = requests.get(url, timeout=30)
-        r.raise_for_status()
-        raw = pd.read_csv(pd.io.common.StringIO(r.text), low_memory=False)
-        n = normalize(raw)
-        for _, row in n.iterrows():
-            dt = parse_date(row.get("Date", ""))
-            if dt in (today, tomorrow) and pd.notna(row["H"]):
-                rows.append(row.to_dict())
-    except Exception as e:
-        print("fixtures hata", e)
-    return rows
+    r = requests.get(FIXTURES_URL, timeout=30)
+    r.raise_for_status()
+    fx = pd.read_csv(pd.io.common.StringIO(r.text))
+    fx = standardize(fx)
+    fx = fx.dropna(subset=["H", "D", "A", "HomeTeam", "AwayTeam"])
+    fx = fx[fx["Date"].astype(str) == today_str()].copy()
+    return fx.reset_index(drop=True)
 
 
 def fetch_finished_current_season():
-    dfs = []
+    frames = []
     for code in LEAGUES:
         url = f"https://www.football-data.co.uk/mmz4281/{SEASON}/{code}.csv"
         try:
             r = requests.get(url, timeout=20)
-            if r.status_code != 200 or not r.text.strip():
+            if r.status_code != 200 or len(r.content) < 400:
                 continue
-            raw = pd.read_csv(pd.io.common.StringIO(r.text), low_memory=False)
-            n = normalize(raw, code)
-            if n.empty:
-                continue
-            n = n[n["FTR"].isin(["H", "D", "A"])]
-            if not n.empty:
-                dfs.append(n)
-        except Exception as e:
-            print("sonuc hata", code, e)
-    if not dfs:
+            df = pd.read_csv(pd.io.common.StringIO(r.text), low_memory=False)
+            df = standardize(df)
+            df = df[df.get("FTR").isin(["H", "D", "A"])] if "FTR" in df.columns else df
+            if len(df):
+                frames.append(df)
+        except Exception:
+            continue
+    if not frames:
         return pd.DataFrame()
-    return pd.concat(dfs, ignore_index=True)
+    out = pd.concat(frames, ignore_index=True)
+    if os.path.exists(LIVE_FILE):
+        old = read_csv_flex(LIVE_FILE)
+        if old is not None and len(old):
+            out = pd.concat([standardize(old), out], ignore_index=True)
+    if "HomeTeam" in out.columns:
+        out = out.drop_duplicates(subset=["Date", "HomeTeam", "AwayTeam"], keep="last")
+    os.makedirs(DATA_DIR, exist_ok=True)
+    out.to_csv(LIVE_FILE, index=False)
+    return out
 
 
-def analyze_match(hist, h, d, a, o25):
-    work = hist.dropna(subset=["H", "D", "A", "FTR"]).copy()
-    if len(work) == 0:
-        return 9.99, (0, 0, 0, 0), (0, 0, 0, 0), "Yok", 0
+def neighbor_stats(hist, row):
+    work = hist.dropna(subset=["H", "D", "A", "O25", "FTR"]).copy()
+    if "Over25" not in work.columns:
+        return None
+    if pd.isna(row["O25"]):
+        return None
+    dist = np.sqrt(
+        (work["H"] - row["H"]) ** 2
+        + (work["D"] - row["D"]) ** 2
+        + (work["A"] - row["A"]) ** 2
+        + (work["O25"] - row["O25"]) ** 2
+    )
+    work = work.assign(mesafe=dist).sort_values("mesafe")
+    if len(work) < 30:
+        return None
 
-    if o25 is not None and not (isinstance(o25, float) and np.isnan(o25)):
-        tmp = work.dropna(subset=["O25"])
-        if len(tmp) >= 30:
-            work = tmp
-            work["mesafe"] = np.sqrt(
-                (work["H"] - h) ** 2
-                + (work["D"] - d) ** 2
-                + (work["A"] - a) ** 2
-                + (work["O25"] - o25) ** 2
-            )
-        else:
-            work["mesafe"] = np.sqrt(
-                (work["H"] - h) ** 2 + (work["D"] - d) ** 2 + (work["A"] - a) ** 2
-            )
-    else:
-        work["mesafe"] = np.sqrt(
-            (work["H"] - h) ** 2 + (work["D"] - d) ** 2 + (work["A"] - a) ** 2
-        )
+    def pack(n):
+        sub = work.head(n)
+        return {
+            "H": round((sub["FTR"] == "H").mean() * 100, 1),
+            "A": round((sub["FTR"] == "A").mean() * 100, 1),
+            "O": round(sub["Over25"].mean() * 100, 1),
+            "B": round(sub["BTTS"].mean() * 100, 1),
+        }
 
-    work = work.sort_values("mesafe")
-
-    def stats(sub):
-        if len(sub) == 0:
-            return 0, 0, 0, 0
-        home = (sub["FTR"] == "H").mean() * 100
-        away = (sub["FTR"] == "A").mean() * 100
-        over = float(sub["Over25"].mean() * 100) if "Over25" in sub else 0
-        btts = float(sub["BTTS"].mean() * 100) if "BTTS" in sub else 0
-        return round(home, 1), round(away, 1), round(over, 1), round(btts, 1)
-
-    s30 = stats(work.head(30))
-    s100 = stats(work.head(min(100, len(work))))
-    mind = round(float(work["mesafe"].iloc[0]), 3)
-    signals = {
-        "Home": (s30[0] + s100[0]) / 2,
-        "Away": (s30[1] + s100[1]) / 2,
-        "Over": (s30[2] + s100[2]) / 2,
-        "BTTS": (s30[3] + s100[3]) / 2,
+    n30 = pack(30)
+    n100 = pack(min(100, len(work)))
+    scores = {
+        "Home": (n30["H"] + n100["H"]) / 2,
+        "Away": (n30["A"] + n100["A"]) / 2,
+        "Over": (n30["O"] + n100["O"]) / 2,
+        "BTTS": (n30["B"] + n100["B"]) / 2,
     }
-    best = max(signals, key=signals.get)
-    return mind, s30, s100, best, round(signals[best], 1)
+    best = max(scores, key=scores.get)
+    return {
+        "mesafe": round(float(work["mesafe"].iloc[0]), 3),
+        "n30": n30,
+        "n100": n100,
+        "sinyal": best,
+        "sinyal_pct": round(scores[best], 1),
+    }
 
 
-def fmt_odd(v):
-    try:
-        if v is None or (isinstance(v, float) and np.isnan(v)):
-            return "-"
-        return f"{float(v):.2f}"
-    except Exception:
-        return "-"
+def fmt_match(row, st):
+    n30, n100 = st["n30"], st["n100"]
+    return (
+        f"<b>{row['HomeTeam']} - {row['AwayTeam']}</b>\n"
+        f"1/X/2: {row['H']:.2f} / {row['D']:.2f} / {row['A']:.2f}   O2.5: {row['O25']:.2f}\n"
+        f"Mesafe: {st['mesafe']}\n"
+        f"n30   H %{n30['H']:.1f} | A %{n30['A']:.1f} | O %{n30['O']:.1f} | BTTS %{n30['B']:.1f}\n"
+        f"n100  H %{n100['H']:.1f} | A %{n100['A']:.1f} | O %{n100['O']:.1f} | BTTS %{n100['B']:.1f}\n"
+        f"Sinyal: {st['sinyal']} %{st['sinyal_pct']:.1f}"
+    )
 
 
 def scan_signals(hist):
-    today_matches = fetch_bulletin()
-    if not today_matches:
+    try:
+        fx = fetch_bulletin()
+    except Exception as e:
+        send_telegram(f"❌ Bülten okunamadı: {e}")
+        return
+
+    if hist is None or len(hist) == 0:
+        send_telegram("❌ Tarihsel data okunamadı. futbol_data klasörünü kontrol et.")
+        return
+
+    if len(fx) == 0:
         send_telegram(
-            f"✅ Tarihsel data: {len(hist)} maç.\n"
-            "⚠️ fixtures.csv içinde bugün/yarın maçı yok."
+            f"⚠️ {today_str()} için henüz oranlı oynanmamış maç yok.\n"
+            "fixtures.csv bugünün tarihini içermiyor."
         )
         return
 
-    today = datetime.now(TZ).strftime("%d.%m.%Y")
     rows = []
-    save_rows = []
-    for m in today_matches:
-        mind, s30, s100, best, bestv = analyze_match(
-            hist, m["H"], m["D"], m["A"], m.get("O25", np.nan)
-        )
-        rec = {**m, "mesafe": mind, "n30": s30, "n100": s100, "best": best, "bestv": bestv}
-        rows.append(rec)
-        save_rows.append({
-            "Date": m.get("Date", ""),
-            "HomeTeam": m.get("HomeTeam", ""),
-            "AwayTeam": m.get("AwayTeam", ""),
-            "H": m.get("H", ""),
-            "D": m.get("D", ""),
-            "A": m.get("A", ""),
-            "O25": m.get("O25", ""),
-            "mesafe": mind,
-            "best": best,
-            "bestv": bestv,
-            "n30H": s30[0], "n30A": s30[1], "n30O": s30[2], "n30B": s30[3],
-            "n100H": s100[0], "n100A": s100[1], "n100O": s100[2], "n100B": s100[3],
-            "rapor_tarihi": today,
+    blocks = []
+    for _, m in fx.iterrows():
+        st = neighbor_stats(hist, m)
+        if not st:
+            continue
+        rows.append({
+            "Date": today_str(),
+            "HomeTeam": m["HomeTeam"],
+            "AwayTeam": m["AwayTeam"],
+            "H": m["H"],
+            "D": m["D"],
+            "A": m["A"],
+            "O25": m["O25"],
+            "mesafe": st["mesafe"],
+            "sinyal": st["sinyal"],
+            "sinyal_pct": st["sinyal_pct"],
         })
-    rows = sorted(rows, key=lambda x: x["mesafe"])
+        blocks.append((st["mesafe"], fmt_match(m, st), st))
 
-    os.makedirs("futbol_data", exist_ok=True)
-    pd.DataFrame(save_rows).to_csv(SIGNALS_FILE, index=False)
+    if not blocks:
+        send_telegram("⚠️ Bugün analiz edilecek oranlı maç bulunamadı.")
+        return
 
+    blocks.sort(key=lambda x: x[0])
+    top = blocks[:15]
     lines = [
-        f"<b>📊 {today} Otomatik Sinyal</b>",
-        f"Bülten: {len(rows)} maç",
+        f"📊 {today_str()} Otomatik Sinyal",
+        f"Bülten: {len(blocks)} maç",
         f"Tarihsel data: {len(hist)} maç",
         "",
     ]
-    for r in rows[:15]:
-        name = f"{r.get('HomeTeam','')} - {r.get('AwayTeam','')}"
-        n30 = r["n30"]
-        n100 = r["n100"]
-        lines.append(f"<b>{name}</b>")
-        lines.append(
-            f"1/X/2: {fmt_odd(r.get('H'))} / {fmt_odd(r.get('D'))} / {fmt_odd(r.get('A'))}   O2.5: {fmt_odd(r.get('O25'))}"
-        )
-        lines.append(f"Mesafe: {r['mesafe']}")
-        lines.append(f"n30   H %{n30[0]} | A %{n30[1]} | O %{n30[2]} | BTTS %{n30[3]}")
-        lines.append(f"n100  H %{n100[0]} | A %{n100[1]} | O %{n100[2]} | BTTS %{n100[3]}")
-        lines.append(f"Sinyal: <b>{r['best']} %{r['bestv']}</b>")
+    for _, txt, _ in top:
+        lines.append(txt)
         lines.append("")
 
-    lines.append("<b>En net 5 sinyal</b>")
-    for i, r in enumerate(rows[:5], 1):
-        lines.append(
-            f"{i}. {r.get('HomeTeam','')} - {r.get('AwayTeam','')} → <b>{r['best']} %{r['bestv']}</b> (mesafe {r['mesafe']})"
-        )
+    lines.append("En net 5 sinyal")
+    for i, (dist, _, st) in enumerate(top[:5], 1):
+        name = top[i - 1][1].split("\n")[0].replace("<b>", "").replace("</b>", "")
+        lines.append(f"{i}. {name} → {st['sinyal']} %{st['sinyal_pct']} (mesafe {dist})")
+
     send_telegram("\n".join(lines))
 
+    os.makedirs(DATA_DIR, exist_ok=True)
+    pd.DataFrame(rows).to_csv(SIGNALS_FILE, index=False)
 
-def signal_hit(best, row):
-    best = str(best).upper()
-    ftr = str(row.get("FTR", "")).upper()
-    over = row.get("Over25", np.nan)
-    btts = row.get("BTTS", np.nan)
-    if best == "HOME":
-        return ftr == "H"
-    if best == "AWAY":
-        return ftr == "A"
-    if best == "OVER":
-        return float(over) == 1.0
-    if best == "BTTS":
-        return float(btts) == 1.0
+
+def signal_hit(sig, row):
+    if sig == "Home":
+        return row.get("FTR") == "H"
+    if sig == "Away":
+        return row.get("FTR") == "A"
+    if sig == "Over":
+        return float(row.get("Over25", 0) or 0) == 1
+    if sig == "BTTS":
+        return float(row.get("BTTS", 0) or 0) == 1
     return False
 
 
-def update_and_review():
-    yeni = fetch_finished_current_season()
-    os.makedirs("futbol_data", exist_ok=True)
-    if not yeni.empty:
-        if os.path.exists(RESULTS_FILE):
-            eski = pd.read_csv(RESULTS_FILE, low_memory=False)
-            hepsi = pd.concat([eski, yeni], ignore_index=True)
-        else:
-            hepsi = yeni
-        hepsi = hepsi.drop_duplicates(subset=["Date", "HomeTeam", "AwayTeam"], keep="last")
-        hepsi.to_csv(RESULTS_FILE, index=False)
-        toplam = len(hepsi)
-    else:
-        toplam = 0
-        yeni = pd.DataFrame()
+def update_and_review(hist):
+    finished = fetch_finished_current_season()
+    n_all = 0 if finished is None else len(finished)
+    today = today_str()
+    day = finished[finished["Date"].astype(str) == today] if n_all else pd.DataFrame()
 
-    lines = [f"<b>📌 {datetime.now(TZ).strftime('%d.%m.%Y')} Gün Sonu Raporu</b>"]
-    lines.append(f"Dataya işlenen bitmiş maç: {toplam}")
-    lines.append("")
+    lines = [
+        f"📌 {today} Gün Sonu Raporu",
+        f"Dataya işlenen bitmiş maç: {n_all}",
+        f"Bu güne ait biten maç: {0 if day is None else len(day)}",
+        "",
+    ]
 
     if not os.path.exists(SIGNALS_FILE):
-        lines.append("Sabah sinyal dosyası yok. Önce scan çalışmalı.")
+        lines.append("Sabah sinyal dosyası yok.")
         send_telegram("\n".join(lines))
         return
 
-    sig = pd.read_csv(SIGNALS_FILE, low_memory=False)
-    if sig.empty or yeni.empty:
-        lines.append("Sinyal veya sonuç henüz eşleşmedi. Kaynak gece geç güncellenebilir.")
+    sig = read_csv_flex(SIGNALS_FILE)
+    if sig is None or len(sig) == 0:
+        lines.append("Sabah sinyal dosyası boş.")
         send_telegram("\n".join(lines))
         return
 
-    tutan = 0
-    toplam_sig = 0
-    bekleyen = 0
-    lines.append("<b>Sabah sinyalleri vs sonuç</b>")
-    for _, s in sig.iterrows():
-        home = str(s.get("HomeTeam", "")).strip()
-        away = str(s.get("AwayTeam", "")).strip()
-        hit_rows = yeni[
-            (yeni["HomeTeam"].astype(str).str.strip() == home)
-            & (yeni["AwayTeam"].astype(str).str.strip() == away)
-        ]
-        if hit_rows.empty:
-            bekleyen += 1
-            lines.append(f"⏳ {home} - {away} → {s.get('best')} henüz sonuç yok")
+    if finished is None or len(finished) == 0:
+        lines.append("Kaynakta bitmiş maç yok. Gece geç güncellenebilir.")
+        send_telegram("\n".join(lines))
+        return
+
+    merged = sig.merge(
+        finished,
+        on=["HomeTeam", "AwayTeam"],
+        how="left",
+        suffixes=("", "_res"),
+    )
+
+    ok = wait = miss = 0
+    lines.append("Sabah sinyalleri vs sonuç")
+    for _, r in merged.iterrows():
+        name = f"{r['HomeTeam']} - {r['AwayTeam']}"
+        sig_name = str(r.get("sinyal", ""))
+        if pd.isna(r.get("FTR")):
+            wait += 1
+            lines.append(f"⏳ {name} → {sig_name} henüz sonuç yok")
             continue
-        row = hit_rows.iloc[0]
-        skor = f"{int(row.get('FTHG', 0)) if pd.notna(row.get('FTHG', np.nan)) else '?'} - {int(row.get('FTAG', 0)) if pd.notna(row.get('FTAG', np.nan)) else '?'}"
-        ok = signal_hit(s.get("best"), row)
-        toplam_sig += 1
-        if ok:
-            tutan += 1
-            lines.append(f"✅ {home} - {away}  {skor} → {s.get('best')} TUTTU")
+        hit = signal_hit(sig_name, r)
+        skor = ""
+        if "FTHG" in r and "FTAG" in r and pd.notna(r["FTHG"]):
+            skor = f" ({int(r['FTHG'])}-{int(r['FTAG'])})"
+        if hit:
+            ok += 1
+            lines.append(f"✅ {name}{skor} → {sig_name} tuttu")
         else:
-            lines.append(f"❌ {home} - {away}  {skor} → {s.get('best')} TUTMADI")
+            miss += 1
+            lines.append(f"❌ {name}{skor} → {sig_name} tutmadı")
 
     lines.append("")
-    if toplam_sig:
-        oran = round(100 * tutan / toplam_sig, 1)
-        lines.append(f"<b>Özet:</b> {tutan}/{toplam_sig} tuttu (%{oran})")
-    lines.append(f"Sonuç bekleyen: {bekleyen}")
+    lines.append(f"Tuttu: {ok} | Tutmadı: {miss} | Bekleyen: {wait}")
     send_telegram("\n".join(lines))
 
 
 def main():
-    mode = os.getenv("MODE", "scan")
     hist = load_local_history()
-    if "FTR" in hist.columns:
-        hist = hist[hist["FTR"].isin(["H", "D", "A"])].copy()
-    print("tarihsel mac:", len(hist), "mode:", mode)
-
-    if hist.empty:
-        send_telegram("❌ Tarihsel data okunamadı.")
-        return
-
-    if mode == "update":
-        update_and_review()
+    if MODE == "update":
+        update_and_review(hist)
     else:
         scan_signals(hist)
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception:
-        err = traceback.format_exc()
-        print(err)
-        send_telegram("❌ Bot hatası:\n<code>" + err[-1500:] + "</code>")
-        raise
+    main()
