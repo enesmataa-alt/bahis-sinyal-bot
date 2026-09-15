@@ -1,7 +1,6 @@
 import os
 import glob
 import zipfile
-import tempfile
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -98,23 +97,36 @@ def standardize(df):
 def load_local_history():
     os.makedirs(DATA_DIR, exist_ok=True)
     frames = []
+    search_roots = [DATA_DIR]
+    unzip_dir = os.path.join(DATA_DIR, "_unzipped")
+    os.makedirs(unzip_dir, exist_ok=True)
 
     for zpath in glob.glob(os.path.join(DATA_DIR, "**", "*.zip"), recursive=True):
+        if "/_unzipped/" in zpath.replace("\\", "/"):
+            continue
         try:
             with zipfile.ZipFile(zpath) as zf:
-                tmp = tempfile.mkdtemp()
-                zf.extractall(tmp)
-        except Exception:
-            continue
+                zf.extractall(unzip_dir)
+            search_roots.append(unzip_dir)
+        except Exception as e:
+            print("zip hata", zpath, e)
 
-    for path in glob.glob(os.path.join(DATA_DIR, "**", "*.csv"), recursive=True):
+    csv_paths = []
+    for root in search_roots:
+        csv_paths.extend(glob.glob(os.path.join(root, "**", "*.csv"), recursive=True))
+
+    print("csv bulundu", len(csv_paths))
+    for path in csv_paths:
         name = os.path.basename(path).lower()
         if name in ("son_sinyaller.csv", "canli_eklenen.csv"):
             continue
         df = read_csv_flex(path)
         if df is None or len(df) == 0:
             continue
-        frames.append(standardize(df))
+        std = standardize(df)
+        if "FTR" not in std.columns:
+            continue
+        frames.append(std)
 
     if not frames:
         return pd.DataFrame()
@@ -122,8 +134,10 @@ def load_local_history():
     hist = pd.concat(frames, ignore_index=True)
     hist = hist.dropna(subset=["H", "D", "A", "FTR"])
     hist = hist[hist["FTR"].isin(["H", "D", "A"])]
-    if "HomeTeam" in hist.columns and "AwayTeam" in hist.columns and "Date" in hist.columns:
-        hist = hist.drop_duplicates(subset=["Date", "HomeTeam", "AwayTeam"], keep="last")
+    cols = [c for c in ["Date", "HomeTeam", "AwayTeam"] if c in hist.columns]
+    if len(cols) == 3:
+        hist = hist.drop_duplicates(subset=cols, keep="last")
+    print("hist", len(hist))
     return hist.reset_index(drop=True)
 
 
@@ -147,7 +161,8 @@ def fetch_finished_current_season():
                 continue
             df = pd.read_csv(pd.io.common.StringIO(r.text), low_memory=False)
             df = standardize(df)
-            df = df[df.get("FTR").isin(["H", "D", "A"])] if "FTR" in df.columns else df
+            if "FTR" in df.columns:
+                df = df[df["FTR"].isin(["H", "D", "A"])]
             if len(df):
                 frames.append(df)
         except Exception:
@@ -159,8 +174,9 @@ def fetch_finished_current_season():
         old = read_csv_flex(LIVE_FILE)
         if old is not None and len(old):
             out = pd.concat([standardize(old), out], ignore_index=True)
-    if "HomeTeam" in out.columns:
-        out = out.drop_duplicates(subset=["Date", "HomeTeam", "AwayTeam"], keep="last")
+    cols = [c for c in ["Date", "HomeTeam", "AwayTeam"] if c in out.columns]
+    if len(cols) == 3:
+        out = out.drop_duplicates(subset=cols, keep="last")
     os.makedirs(DATA_DIR, exist_ok=True)
     out.to_csv(LIVE_FILE, index=False)
     return out
@@ -170,7 +186,7 @@ def neighbor_stats(hist, row):
     work = hist.dropna(subset=["H", "D", "A", "O25", "FTR"]).copy()
     if "Over25" not in work.columns:
         return None
-    if pd.isna(row["O25"]):
+    if pd.isna(row.get("O25")):
         return None
     dist = np.sqrt(
         (work["H"] - row["H"]) ** 2
@@ -276,12 +292,11 @@ def scan_signals(hist):
         lines.append("")
 
     lines.append("En net 5 sinyal")
-    for i, (dist, _, st) in enumerate(top[:5], 1):
-        name = top[i - 1][1].split("\n")[0].replace("<b>", "").replace("</b>", "")
+    for i, (dist, txt, st) in enumerate(top[:5], 1):
+        name = txt.split("\n")[0].replace("<b>", "").replace("</b>", "")
         lines.append(f"{i}. {name} → {st['sinyal']} %{st['sinyal_pct']} (mesafe {dist})")
 
     send_telegram("\n".join(lines))
-
     os.makedirs(DATA_DIR, exist_ok=True)
     pd.DataFrame(rows).to_csv(SIGNALS_FILE, index=False)
 
