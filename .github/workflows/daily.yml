@@ -1,46 +1,49 @@
 name: Bahis Sinyal Bot
 
 on:
+  schedule:
+    - cron: "0 9 * * *"
+    - cron: "30 21 * * *"
   workflow_dispatch:
     inputs:
       mode:
         description: "scan veya update"
-        required: false
+        required: true
         default: scan
-  schedule:
-    - cron: '0 9 * * *'
-    - cron: '30 21 * * *'
-
-permissions:
-  contents: write
+        type: choice
+        options:
+          - scan
+          - update
 
 jobs:
-  run-analysis:
+  run:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install deps
+        run: pip install pandas numpy requests
+
+      - name: Pick mode
+        id: pick
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            HOUR="${{ github.event.schedule }}"
+            if [ "$HOUR" = "30 21 * * *" ]; then
+              echo "mode=update" >> $GITHUB_OUTPUT
+            else
+              echo "mode=scan" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "mode=${{ inputs.mode }}" >> $GITHUB_OUTPUT
+          fi
 
       - name: Run the bot
         env:
+          MODE: ${{ steps.pick.outputs.mode }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          MODE: ${{ github.event.inputs.mode || (github.event.schedule == '30 21 * * *' && 'update' || 'scan') }}
-        run: python main.py
-
-      - name: Save new files
-        if: success()
-        run: |
-          git config user.name "bahis-bot"
-          git config user.email "bot@local"
-          git add futbol_data/canli_eklenen.csv futbol_data/son_sinyaller.csv || true
-          git diff --cached --quiet || git commit -m "gun sonu sonuclar ve sinyaller"
-          git push || true
