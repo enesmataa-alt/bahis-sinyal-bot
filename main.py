@@ -108,11 +108,15 @@ def standardize(df):
         out["FTAG"] = pd.to_numeric(out["FTAG"], errors="coerce")
         out["Over25"] = ((out["FTHG"] + out["FTAG"]) > 2.5).astype(float)
         out["BTTS"] = ((out["FTHG"] > 0) & (out["FTAG"] > 0)).astype(float)
-        out["FTR"] = np.where(
-            out["FTHG"] > out["FTAG"], "H",
-            np.where(out["FTHG"] < out["FTAG"], "A",
-                     np.where(out["FTHG"].notna(), "D", np.nan)),
-        )
+        known = out["FTHG"].notna() & out["FTAG"].notna()
+        ftr = pd.Series(pd.NA, index=out.index, dtype="object")
+        ftr.loc[known & (out["FTHG"] > out["FTAG"])] = "H"
+        ftr.loc[known & (out["FTHG"] < out["FTAG"])] = "A"
+        ftr.loc[known & (out["FTHG"] == out["FTAG"])] = "D"
+        if "FTR" in out.columns:
+            out.loc[known, "FTR"] = ftr.loc[known]
+        else:
+            out["FTR"] = ftr
     if "HomeTeam" not in out.columns and "Home" in out.columns:
         out["HomeTeam"] = out["Home"]
     if "AwayTeam" not in out.columns and "Away" in out.columns:
@@ -145,7 +149,11 @@ def load_local_history():
         df = read_csv_flex(path)
         if df is None or len(df) == 0:
             continue
-        std = standardize(df)
+        try:
+            std = standardize(df)
+        except Exception as e:
+            print("standardize hata", path, e)
+            continue
         if "FTR" not in std.columns:
             continue
         frames.append(std)
@@ -315,7 +323,7 @@ def merge_matches(*frames, how="bulletin"):
     out["home_n"] = out["HomeTeam"].map(norm_name)
     out["away_n"] = out["AwayTeam"].map(norm_name)
     out["_o25"] = out["O25"].notna().astype(int) if "O25" in out.columns else 0
-    rank = {"odds_api": 0, "fixtures_csv": 1, "soccerbets": 2}
+    rank = {"odds_api": 0, "fixtures_csv": 1, "soccerbets": 2, "football_data": 1}
     src = out["kaynak"] if "kaynak" in out.columns else pd.Series(["z"] * len(out))
     out["_src"] = src.map(lambda s: rank.get(s, 9))
     if how == "result":
@@ -621,11 +629,15 @@ def update_and_review(hist):
 
 
 def main():
-    hist = load_local_history()
-    if MODE == "update":
-        update_and_review(hist)
-    else:
-        scan_signals(hist)
+    try:
+        hist = load_local_history()
+        if MODE == "update":
+            update_and_review(hist)
+        else:
+            scan_signals(hist)
+    except Exception as e:
+        send_telegram(f"❌ Hata: {type(e).__name__}: {e}")
+        raise
 
 
 if __name__ == "__main__":
