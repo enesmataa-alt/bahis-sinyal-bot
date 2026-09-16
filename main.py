@@ -10,21 +10,15 @@ import requests
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+ODDS_API_KEY = os.getenv("ODDS_API_KEY", "")
 MODE = os.getenv("MODE", "scan").strip().lower()
 
 SEASON = "2627"
 LEAGUES = [
     "E0", "E1", "E2", "E3", "EC",
-    "D1", "D2",
-    "I1", "I2",
-    "SP1", "SP2",
-    "F1", "F2",
-    "N1",
-    "B1",
-    "P1",
-    "T1",
-    "SC0", "SC1", "SC2",
-    "G1",
+    "D1", "D2", "I1", "I2", "SP1", "SP2",
+    "F1", "F2", "N1", "B1", "P1", "T1",
+    "SC0", "SC1", "SC2", "G1",
 ]
 
 DATA_DIR = "futbol_data"
@@ -33,9 +27,37 @@ LIVE_FILE = os.path.join(DATA_DIR, "canli_eklenen.csv")
 FIXTURES_URL = "https://www.football-data.co.uk/fixtures.csv"
 TR = ZoneInfo("Europe/Istanbul")
 
+ODDS_SPORTS = [
+    "soccer_epl",
+    "soccer_efl_champ",
+    "soccer_england_efl_cup",
+    "soccer_england_league1",
+    "soccer_fa_cup",
+    "soccer_spain_la_liga",
+    "soccer_spain_segunda_division",
+    "soccer_italy_serie_a",
+    "soccer_italy_serie_b",
+    "soccer_germany_bundesliga",
+    "soccer_germany_bundesliga2",
+    "soccer_france_ligue_one",
+    "soccer_france_ligue_two",
+    "soccer_netherlands_eredivisie",
+    "soccer_turkey_super_league",
+    "soccer_portugal_primeira_liga",
+    "soccer_belgium_first_div",
+    "soccer_spl",
+    "soccer_uefa_champs_league",
+    "soccer_uefa_europa_league",
+    "soccer_uefa_europa_conference_league",
+]
+
 
 def today_str():
     return datetime.now(TR).strftime("%d/%m/%Y")
+
+
+def today_date():
+    return datetime.now(TR).date()
 
 
 def send_telegram(text):
@@ -44,14 +66,9 @@ def send_telegram(text):
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     for i in range(0, len(text), 3500):
-        chunk = text[i:i + 3500]
         requests.post(
             url,
-            data={
-                "chat_id": TELEGRAM_CHAT_ID,
-                "text": chunk,
-                "parse_mode": "HTML",
-            },
+            data={"chat_id": TELEGRAM_CHAT_ID, "text": text[i:i + 3500], "parse_mode": "HTML"},
             timeout=30,
         )
 
@@ -74,10 +91,10 @@ def read_csv_flex(path):
 
 def standardize(df):
     out = df.copy()
-    h = pick_col(out, ["B365H", "AvgH", "PSH", "BbAvH"])
-    d = pick_col(out, ["B365D", "AvgD", "PSD", "BbAvD"])
-    a = pick_col(out, ["B365A", "AvgA", "PSA", "BbAvA"])
-    o = pick_col(out, ["B365>2.5", "Avg>2.5", "P>2.5", "BbAv>2.5"])
+    h = pick_col(out, ["B365H", "AvgH", "PSH", "BbAvH", "H"])
+    d = pick_col(out, ["B365D", "AvgD", "PSD", "BbAvD", "D"])
+    a = pick_col(out, ["B365A", "AvgA", "PSA", "BbAvA", "A"])
+    o = pick_col(out, ["B365>2.5", "Avg>2.5", "P>2.5", "BbAv>2.5", "O25"])
     out["H"] = pd.to_numeric(out[h], errors="coerce") if h else np.nan
     out["D"] = pd.to_numeric(out[d], errors="coerce") if d else np.nan
     out["A"] = pd.to_numeric(out[a], errors="coerce") if a else np.nan
@@ -100,7 +117,6 @@ def load_local_history():
     search_roots = [DATA_DIR]
     unzip_dir = os.path.join(DATA_DIR, "_unzipped")
     os.makedirs(unzip_dir, exist_ok=True)
-
     for zpath in glob.glob(os.path.join(DATA_DIR, "**", "*.zip"), recursive=True):
         if "/_unzipped/" in zpath.replace("\\", "/"):
             continue
@@ -110,12 +126,9 @@ def load_local_history():
             search_roots.append(unzip_dir)
         except Exception as e:
             print("zip hata", zpath, e)
-
     csv_paths = []
     for root in search_roots:
         csv_paths.extend(glob.glob(os.path.join(root, "**", "*.csv"), recursive=True))
-
-    print("csv bulundu", len(csv_paths))
     for path in csv_paths:
         name = os.path.basename(path).lower()
         if name in ("son_sinyaller.csv", "canli_eklenen.csv"):
@@ -127,10 +140,8 @@ def load_local_history():
         if "FTR" not in std.columns:
             continue
         frames.append(std)
-
     if not frames:
         return pd.DataFrame()
-
     hist = pd.concat(frames, ignore_index=True)
     hist = hist.dropna(subset=["H", "D", "A", "FTR"])
     hist = hist[hist["FTR"].isin(["H", "D", "A"])]
@@ -141,7 +152,76 @@ def load_local_history():
     return hist.reset_index(drop=True)
 
 
-def fetch_bulletin():
+def fetch_bulletin_odds_api():
+    if not ODDS_API_KEY:
+        return pd.DataFrame()
+    rows = []
+    today = today_date()
+    for sport in ODDS_SPORTS:
+        try:
+            r = requests.get(
+                f"https://api.the-odds-api.com/v4/sports/{sport}/odds",
+                params={
+                    "apiKey": ODDS_API_KEY,
+                    "regions": "uk",
+                    "markets": "h2h,totals",
+                    "oddsFormat": "decimal",
+                    "bookmakers": "bet365",
+                },
+                timeout=25,
+            )
+            if r.status_code != 200:
+                print("odds api", sport, r.status_code, r.text[:120])
+                continue
+            for ev in r.json():
+                try:
+                    ct = datetime.fromisoformat(ev["commence_time"].replace("Z", "+00:00")).astimezone(TR).date()
+                except Exception:
+                    continue
+                if ct != today:
+                    continue
+                home = ev.get("home_team")
+                away = ev.get("away_team")
+                h = d = a = o25 = None
+                for bk in ev.get("bookmakers", []):
+                    for mk in bk.get("markets", []):
+                        if mk.get("key") == "h2h":
+                            for oc in mk.get("outcomes", []):
+                                name = oc.get("name", "")
+                                if name == home:
+                                    h = oc.get("price")
+                                elif name == away:
+                                    a = oc.get("price")
+                                elif name.lower() in ("draw", "the draw"):
+                                    d = oc.get("price")
+                        if mk.get("key") == "totals":
+                            for oc in mk.get("outcomes", []):
+                                pt = oc.get("point")
+                                if pt is None:
+                                    continue
+                                if abs(float(pt) - 2.5) < 0.01 and str(oc.get("name", "")).lower() == "over":
+                                    o25 = oc.get("price")
+                if h and d and a:
+                    rows.append({
+                        "Date": today_str(),
+                        "HomeTeam": home,
+                        "AwayTeam": away,
+                        "H": float(h),
+                        "D": float(d),
+                        "A": float(a),
+                        "O25": float(o25) if o25 else np.nan,
+                        "Div": sport,
+                    })
+        except Exception as e:
+            print("odds sport hata", sport, e)
+    if not rows:
+        return pd.DataFrame()
+    fx = pd.DataFrame(rows).drop_duplicates(subset=["HomeTeam", "AwayTeam"])
+    print("odds api maç", len(fx))
+    return fx
+
+
+def fetch_bulletin_fixtures():
     r = requests.get(FIXTURES_URL, timeout=30)
     r.raise_for_status()
     fx = pd.read_csv(pd.io.common.StringIO(r.text))
@@ -149,6 +229,14 @@ def fetch_bulletin():
     fx = fx.dropna(subset=["H", "D", "A", "HomeTeam", "AwayTeam"])
     fx = fx[fx["Date"].astype(str) == today_str()].copy()
     return fx.reset_index(drop=True)
+
+
+def fetch_bulletin():
+    fx = fetch_bulletin_odds_api()
+    if fx is not None and len(fx) > 0:
+        return fx.reset_index(drop=True)
+    print("odds api boş, fixtures.csv yedek")
+    return fetch_bulletin_fixtures()
 
 
 def fetch_finished_current_season():
@@ -183,17 +271,21 @@ def fetch_finished_current_season():
 
 
 def neighbor_stats(hist, row):
-    work = hist.dropna(subset=["H", "D", "A", "O25", "FTR"]).copy()
-    if "Over25" not in work.columns:
-        return None
+    work = hist.dropna(subset=["H", "D", "A", "O25", "FTR", "Over25", "BTTS"]).copy()
     if pd.isna(row.get("O25")):
-        return None
-    dist = np.sqrt(
-        (work["H"] - row["H"]) ** 2
-        + (work["D"] - row["D"]) ** 2
-        + (work["A"] - row["A"]) ** 2
-        + (work["O25"] - row["O25"]) ** 2
-    )
+        work = hist.dropna(subset=["H", "D", "A", "FTR", "Over25", "BTTS"]).copy()
+        dist = np.sqrt(
+            (work["H"] - row["H"]) ** 2
+            + (work["D"] - row["D"]) ** 2
+            + (work["A"] - row["A"]) ** 2
+        )
+    else:
+        dist = np.sqrt(
+            (work["H"] - row["H"]) ** 2
+            + (work["D"] - row["D"]) ** 2
+            + (work["A"] - row["A"]) ** 2
+            + (work["O25"] - row["O25"]) ** 2
+        )
     work = work.assign(mesafe=dist).sort_values("mesafe")
     if len(work) < 30:
         return None
@@ -227,9 +319,11 @@ def neighbor_stats(hist, row):
 
 def fmt_match(row, st):
     n30, n100 = st["n30"], st["n100"]
+    o25 = row["O25"]
+    o_txt = f"{o25:.2f}" if pd.notna(o25) else "-"
     return (
         f"<b>{row['HomeTeam']} - {row['AwayTeam']}</b>\n"
-        f"1/X/2: {row['H']:.2f} / {row['D']:.2f} / {row['A']:.2f}   O2.5: {row['O25']:.2f}\n"
+        f"1/X/2: {row['H']:.2f} / {row['D']:.2f} / {row['A']:.2f}   O2.5: {o_txt}\n"
         f"Mesafe: {st['mesafe']}\n"
         f"n30   H %{n30['H']:.1f} | A %{n30['A']:.1f} | O %{n30['O']:.1f} | BTTS %{n30['B']:.1f}\n"
         f"n100  H %{n100['H']:.1f} | A %{n100['A']:.1f} | O %{n100['O']:.1f} | BTTS %{n100['B']:.1f}\n"
@@ -243,16 +337,11 @@ def scan_signals(hist):
     except Exception as e:
         send_telegram(f"❌ Bülten okunamadı: {e}")
         return
-
     if hist is None or len(hist) == 0:
         send_telegram("❌ Tarihsel data okunamadı. futbol_data klasörünü kontrol et.")
         return
-
     if len(fx) == 0:
-        send_telegram(
-            f"⚠️ {today_str()} için henüz oranlı oynanmamış maç yok.\n"
-            "fixtures.csv bugünün tarihini içermiyor."
-        )
+        send_telegram(f"⚠️ {today_str()} için oranlı maç yok.")
         return
 
     rows = []
@@ -265,10 +354,7 @@ def scan_signals(hist):
             "Date": today_str(),
             "HomeTeam": m["HomeTeam"],
             "AwayTeam": m["AwayTeam"],
-            "H": m["H"],
-            "D": m["D"],
-            "A": m["A"],
-            "O25": m["O25"],
+            "H": m["H"], "D": m["D"], "A": m["A"], "O25": m.get("O25"),
             "mesafe": st["mesafe"],
             "sinyal": st["sinyal"],
             "sinyal_pct": st["sinyal_pct"],
@@ -280,7 +366,7 @@ def scan_signals(hist):
         return
 
     blocks.sort(key=lambda x: x[0])
-    top = blocks[:15]
+    top = blocks[:20]
     lines = [
         f"📊 {today_str()} Otomatik Sinyal",
         f"Bülten: {len(blocks)} maç",
@@ -290,12 +376,10 @@ def scan_signals(hist):
     for _, txt, _ in top:
         lines.append(txt)
         lines.append("")
-
     lines.append("En net 5 sinyal")
     for i, (dist, txt, st) in enumerate(top[:5], 1):
         name = txt.split("\n")[0].replace("<b>", "").replace("</b>", "")
         lines.append(f"{i}. {name} → {st['sinyal']} %{st['sinyal_pct']} (mesafe {dist})")
-
     send_telegram("\n".join(lines))
     os.makedirs(DATA_DIR, exist_ok=True)
     pd.DataFrame(rows).to_csv(SIGNALS_FILE, index=False)
@@ -318,37 +402,26 @@ def update_and_review(hist):
     n_all = 0 if finished is None else len(finished)
     today = today_str()
     day = finished[finished["Date"].astype(str) == today] if n_all else pd.DataFrame()
-
     lines = [
         f"📌 {today} Gün Sonu Raporu",
         f"Dataya işlenen bitmiş maç: {n_all}",
         f"Bu güne ait biten maç: {0 if day is None else len(day)}",
         "",
     ]
-
     if not os.path.exists(SIGNALS_FILE):
         lines.append("Sabah sinyal dosyası yok.")
         send_telegram("\n".join(lines))
         return
-
     sig = read_csv_flex(SIGNALS_FILE)
     if sig is None or len(sig) == 0:
         lines.append("Sabah sinyal dosyası boş.")
         send_telegram("\n".join(lines))
         return
-
     if finished is None or len(finished) == 0:
-        lines.append("Kaynakta bitmiş maç yok. Gece geç güncellenebilir.")
+        lines.append("Kaynakta bitmiş maç yok.")
         send_telegram("\n".join(lines))
         return
-
-    merged = sig.merge(
-        finished,
-        on=["HomeTeam", "AwayTeam"],
-        how="left",
-        suffixes=("", "_res"),
-    )
-
+    merged = sig.merge(finished, on=["HomeTeam", "AwayTeam"], how="left", suffixes=("", "_res"))
     ok = wait = miss = 0
     lines.append("Sabah sinyalleri vs sonuç")
     for _, r in merged.iterrows():
@@ -360,7 +433,7 @@ def update_and_review(hist):
             continue
         hit = signal_hit(sig_name, r)
         skor = ""
-        if "FTHG" in r and "FTAG" in r and pd.notna(r["FTHG"]):
+        if "FTHG" in r and pd.notna(r.get("FTHG")):
             skor = f" ({int(r['FTHG'])}-{int(r['FTAG'])})"
         if hit:
             ok += 1
@@ -368,7 +441,6 @@ def update_and_review(hist):
         else:
             miss += 1
             lines.append(f"❌ {name}{skor} → {sig_name} tutmadı")
-
     lines.append("")
     lines.append(f"Tuttu: {ok} | Tutmadı: {miss} | Bekleyen: {wait}")
     send_telegram("\n".join(lines))
