@@ -27,28 +27,46 @@ LIVE_FILE = os.path.join(DATA_DIR, "canli_eklenen.csv")
 FIXTURES_URL = "https://www.football-data.co.uk/fixtures.csv"
 TR = ZoneInfo("Europe/Istanbul")
 
-ODDS_SPORTS = [
-    "soccer_epl",
-    "soccer_efl_champ",
-    "soccer_england_efl_cup",
-    "soccer_england_league1",
-    "soccer_fa_cup",
-    "soccer_spain_la_liga",
-    "soccer_spain_segunda_division",
-    "soccer_italy_serie_a",
-    "soccer_italy_serie_b",
-    "soccer_germany_bundesliga",
-    "soccer_germany_bundesliga2",
-    "soccer_france_ligue_one",
-    "soccer_france_ligue_two",
-    "soccer_netherlands_eredivisie",
-    "soccer_turkey_super_league",
-    "soccer_portugal_primeira_liga",
-    "soccer_belgium_first_div",
-    "soccer_spl",
-    "soccer_uefa_champs_league",
+SPORTS_CORE = [
     "soccer_uefa_europa_league",
     "soccer_uefa_europa_conference_league",
+    "soccer_uefa_champs_league",
+    "soccer_england_efl_cup",
+    "soccer_epl",
+    "soccer_efl_champ",
+    "soccer_spain_la_liga",
+    "soccer_italy_serie_a",
+    "soccer_germany_bundesliga",
+    "soccer_france_ligue_one",
+    "soccer_netherlands_eredivisie",
+    "soccer_turkey_super_league",
+    "soccer_spl",
+    "soccer_spain_segunda_division",
+    "soccer_switzerland_superleague",
+]
+
+SPORTS_EXTRA = [
+    "soccer_england_league1",
+    "soccer_england_league2",
+    "soccer_italy_serie_b",
+    "soccer_germany_bundesliga2",
+    "soccer_france_ligue_two",
+    "soccer_portugal_primeira_liga",
+    "soccer_belgium_first_div",
+    "soccer_greece_super_league",
+    "soccer_austria_bundesliga",
+    "soccer_denmark_superliga",
+    "soccer_poland_ekstraklasa",
+    "soccer_sweden_allsvenskan",
+    "soccer_norway_eliteserien",
+    "soccer_argentina_primera_division",
+    "soccer_brazil_campeonato",
+    "soccer_usa_mls",
+    "soccer_mexico_ligamx",
+    "soccer_japan_j_league",
+    "soccer_korea_kleague1",
+    "soccer_conmebol_copa_libertadores",
+    "soccer_conmebol_copa_sudamericana",
 ]
 
 
@@ -152,68 +170,91 @@ def load_local_history():
     return hist.reset_index(drop=True)
 
 
+def parse_event(ev, sport):
+    try:
+        ct = datetime.fromisoformat(ev["commence_time"].replace("Z", "+00:00")).astimezone(TR).date()
+    except Exception:
+        return None
+    if ct != today_date():
+        return None
+    home = ev.get("home_team")
+    away = ev.get("away_team")
+    h = d = a = o25 = None
+    for bk in ev.get("bookmakers", []):
+        for mk in bk.get("markets", []):
+            if mk.get("key") == "h2h" and h is None:
+                for oc in mk.get("outcomes", []):
+                    name = oc.get("name", "")
+                    if name == home:
+                        h = oc.get("price")
+                    elif name == away:
+                        a = oc.get("price")
+                    elif str(name).lower() in ("draw", "the draw"):
+                        d = oc.get("price")
+            if mk.get("key") == "totals" and o25 is None:
+                for oc in mk.get("outcomes", []):
+                    pt = oc.get("point")
+                    if pt is None:
+                        continue
+                    if abs(float(pt) - 2.5) < 0.01 and str(oc.get("name", "")).lower() == "over":
+                        o25 = oc.get("price")
+    if not (h and d and a):
+        return None
+    return {
+        "Date": today_str(),
+        "HomeTeam": home,
+        "AwayTeam": away,
+        "H": float(h),
+        "D": float(d),
+        "A": float(a),
+        "O25": float(o25) if o25 else np.nan,
+        "Div": sport,
+    }
+
+
+def pull_sport(sport, markets, remaining_min=20):
+    r = requests.get(
+        f"https://api.the-odds-api.com/v4/sports/{sport}/odds",
+        params={
+            "apiKey": ODDS_API_KEY,
+            "regions": "uk",
+            "markets": markets,
+            "oddsFormat": "decimal",
+        },
+        timeout=25,
+    )
+    left = r.headers.get("x-requests-remaining")
+    print("odds api", sport, r.status_code, "left", left)
+    if left is not None and int(left) < remaining_min:
+        return [], int(left)
+    if r.status_code != 200:
+        print(r.text[:180])
+        return [], int(left) if left else None
+    rows = []
+    for ev in r.json():
+        parsed = parse_event(ev, sport)
+        if parsed:
+            rows.append(parsed)
+    return rows, int(left) if left else None
+
+
 def fetch_bulletin_odds_api():
     if not ODDS_API_KEY:
+        print("ODDS_API_KEY yok")
         return pd.DataFrame()
     rows = []
-    today = today_date()
-    for sport in ODDS_SPORTS:
-        try:
-            r = requests.get(
-                f"https://api.the-odds-api.com/v4/sports/{sport}/odds",
-                params={
-                    "apiKey": ODDS_API_KEY,
-                    "regions": "uk",
-                    "markets": "h2h,totals",
-                    "oddsFormat": "decimal",
-                    "bookmakers": "bet365",
-                },
-                timeout=25,
-            )
-            if r.status_code != 200:
-                print("odds api", sport, r.status_code, r.text[:120])
-                continue
-            for ev in r.json():
-                try:
-                    ct = datetime.fromisoformat(ev["commence_time"].replace("Z", "+00:00")).astimezone(TR).date()
-                except Exception:
-                    continue
-                if ct != today:
-                    continue
-                home = ev.get("home_team")
-                away = ev.get("away_team")
-                h = d = a = o25 = None
-                for bk in ev.get("bookmakers", []):
-                    for mk in bk.get("markets", []):
-                        if mk.get("key") == "h2h":
-                            for oc in mk.get("outcomes", []):
-                                name = oc.get("name", "")
-                                if name == home:
-                                    h = oc.get("price")
-                                elif name == away:
-                                    a = oc.get("price")
-                                elif name.lower() in ("draw", "the draw"):
-                                    d = oc.get("price")
-                        if mk.get("key") == "totals":
-                            for oc in mk.get("outcomes", []):
-                                pt = oc.get("point")
-                                if pt is None:
-                                    continue
-                                if abs(float(pt) - 2.5) < 0.01 and str(oc.get("name", "")).lower() == "over":
-                                    o25 = oc.get("price")
-                if h and d and a:
-                    rows.append({
-                        "Date": today_str(),
-                        "HomeTeam": home,
-                        "AwayTeam": away,
-                        "H": float(h),
-                        "D": float(d),
-                        "A": float(a),
-                        "O25": float(o25) if o25 else np.nan,
-                        "Div": sport,
-                    })
-        except Exception as e:
-            print("odds sport hata", sport, e)
+    left = None
+    for sport in SPORTS_CORE:
+        part, left = pull_sport(sport, "h2h,totals")
+        rows.extend(part)
+        if left is not None and left < 40:
+            break
+    if left is None or left >= 80:
+        for sport in SPORTS_EXTRA:
+            part, left = pull_sport(sport, "h2h")
+            rows.extend(part)
+            if left is not None and left < 40:
+                break
     if not rows:
         return pd.DataFrame()
     fx = pd.DataFrame(rows).drop_duplicates(subset=["HomeTeam", "AwayTeam"])
@@ -271,24 +312,33 @@ def fetch_finished_current_season():
 
 
 def neighbor_stats(hist, row):
-    work = hist.dropna(subset=["H", "D", "A", "O25", "FTR", "Over25", "BTTS"]).copy()
-    if pd.isna(row.get("O25")):
-        work = hist.dropna(subset=["H", "D", "A", "FTR", "Over25", "BTTS"]).copy()
-        dist = np.sqrt(
-            (work["H"] - row["H"]) ** 2
-            + (work["D"] - row["D"]) ** 2
-            + (work["A"] - row["A"]) ** 2
-        )
+    work = hist.dropna(subset=["H", "D", "A", "FTR", "Over25", "BTTS"]).copy()
+    if len(work) < 30:
+        return None
+    if pd.notna(row.get("O25")):
+        work2 = work.dropna(subset=["O25"])
+        if len(work2) >= 30:
+            dist = np.sqrt(
+                (work2["H"] - row["H"]) ** 2
+                + (work2["D"] - row["D"]) ** 2
+                + (work2["A"] - row["A"]) ** 2
+                + (work2["O25"] - row["O25"]) ** 2
+            )
+            work = work2.assign(mesafe=dist).sort_values("mesafe")
+        else:
+            dist = np.sqrt(
+                (work["H"] - row["H"]) ** 2
+                + (work["D"] - row["D"]) ** 2
+                + (work["A"] - row["A"]) ** 2
+            )
+            work = work.assign(mesafe=dist).sort_values("mesafe")
     else:
         dist = np.sqrt(
             (work["H"] - row["H"]) ** 2
             + (work["D"] - row["D"]) ** 2
             + (work["A"] - row["A"]) ** 2
-            + (work["O25"] - row["O25"]) ** 2
         )
-    work = work.assign(mesafe=dist).sort_values("mesafe")
-    if len(work) < 30:
-        return None
+        work = work.assign(mesafe=dist).sort_values("mesafe")
 
     def pack(n):
         sub = work.head(n)
@@ -319,8 +369,8 @@ def neighbor_stats(hist, row):
 
 def fmt_match(row, st):
     n30, n100 = st["n30"], st["n100"]
-    o25 = row["O25"]
-    o_txt = f"{o25:.2f}" if pd.notna(o25) else "-"
+    o25 = row.get("O25")
+    o_txt = f"{float(o25):.2f}" if pd.notna(o25) else "-"
     return (
         f"<b>{row['HomeTeam']} - {row['AwayTeam']}</b>\n"
         f"1/X/2: {row['H']:.2f} / {row['D']:.2f} / {row['A']:.2f}   O2.5: {o_txt}\n"
