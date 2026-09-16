@@ -1,7 +1,8 @@
 import os
 import glob
 import zipfile
-from datetime import datetime
+import re
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -25,6 +26,7 @@ DATA_DIR = "futbol_data"
 SIGNALS_FILE = os.path.join(DATA_DIR, "son_sinyaller.csv")
 LIVE_FILE = os.path.join(DATA_DIR, "canli_eklenen.csv")
 FIXTURES_URL = "https://www.football-data.co.uk/fixtures.csv"
+SOCCERBETS_URL = "https://api.soccerbets.com/exports/matches-odds-export.csv"
 TR = ZoneInfo("Europe/Istanbul")
 
 SPORTS_CORE = [
@@ -45,30 +47,6 @@ SPORTS_CORE = [
     "soccer_switzerland_superleague",
 ]
 
-SPORTS_EXTRA = [
-    "soccer_england_league1",
-    "soccer_england_league2",
-    "soccer_italy_serie_b",
-    "soccer_germany_bundesliga2",
-    "soccer_france_ligue_two",
-    "soccer_portugal_primeira_liga",
-    "soccer_belgium_first_div",
-    "soccer_greece_super_league",
-    "soccer_austria_bundesliga",
-    "soccer_denmark_superliga",
-    "soccer_poland_ekstraklasa",
-    "soccer_sweden_allsvenskan",
-    "soccer_norway_eliteserien",
-    "soccer_argentina_primera_division",
-    "soccer_brazil_campeonato",
-    "soccer_usa_mls",
-    "soccer_mexico_ligamx",
-    "soccer_japan_j_league",
-    "soccer_korea_kleague1",
-    "soccer_conmebol_copa_libertadores",
-    "soccer_conmebol_copa_sudamericana",
-]
-
 
 def today_str():
     return datetime.now(TR).strftime("%d/%m/%Y")
@@ -76,6 +54,14 @@ def today_str():
 
 def today_date():
     return datetime.now(TR).date()
+
+
+def norm_name(x):
+    s = str(x or "").lower()
+    s = re.sub(r"[^a-z0-9]+", " ", s)
+    for w in ("fc", "cf", "afc", "sc", "cd", "ud", "ac", "as", "the"):
+        s = re.sub(rf"\b{w}\b", " ", s)
+    return " ".join(s.split())
 
 
 def send_telegram(text):
@@ -109,9 +95,9 @@ def read_csv_flex(path):
 
 def standardize(df):
     out = df.copy()
-    h = pick_col(out, ["B365H", "AvgH", "PSH", "BbAvH", "H"])
-    d = pick_col(out, ["B365D", "AvgD", "PSD", "BbAvD", "D"])
-    a = pick_col(out, ["B365A", "AvgA", "PSA", "BbAvA", "A"])
+    h = pick_col(out, ["B365H", "AvgH", "PSH", "BbAvH", "H", "Pinnacle Home"])
+    d = pick_col(out, ["B365D", "AvgD", "PSD", "BbAvD", "D", "Pinnacle Draw"])
+    a = pick_col(out, ["B365A", "AvgA", "PSA", "BbAvA", "A", "Pinnacle Away"])
     o = pick_col(out, ["B365>2.5", "Avg>2.5", "P>2.5", "BbAv>2.5", "O25"])
     out["H"] = pd.to_numeric(out[h], errors="coerce") if h else np.nan
     out["D"] = pd.to_numeric(out[d], errors="coerce") if d else np.nan
@@ -122,6 +108,9 @@ def standardize(df):
         out["FTAG"] = pd.to_numeric(out["FTAG"], errors="coerce")
         out["Over25"] = ((out["FTHG"] + out["FTAG"]) > 2.5).astype(float)
         out["BTTS"] = ((out["FTHG"] > 0) & (out["FTAG"] > 0)).astype(float)
+        out["FTR"] = np.where(out["FTHG"] > out["FTAG"], "H",
+                       np.where(out["FTHG"] < out["FTAG"], "A",
+                       np.where(out["FTHG"].notna(), "D", np.nan)))
     if "HomeTeam" not in out.columns and "Home" in out.columns:
         out["HomeTeam"] = out["Home"]
     if "AwayTeam" not in out.columns and "Away" in out.columns:
@@ -209,33 +198,8 @@ def parse_event(ev, sport):
         "A": float(a),
         "O25": float(o25) if o25 else np.nan,
         "Div": sport,
+        "kaynak": "odds_api",
     }
-
-
-def pull_sport(sport, markets, remaining_min=20):
-    r = requests.get(
-        f"https://api.the-odds-api.com/v4/sports/{sport}/odds",
-        params={
-            "apiKey": ODDS_API_KEY,
-            "regions": "uk",
-            "markets": markets,
-            "oddsFormat": "decimal",
-        },
-        timeout=25,
-    )
-    left = r.headers.get("x-requests-remaining")
-    print("odds api", sport, r.status_code, "left", left)
-    if left is not None and int(left) < remaining_min:
-        return [], int(left)
-    if r.status_code != 200:
-        print(r.text[:180])
-        return [], int(left) if left else None
-    rows = []
-    for ev in r.json():
-        parsed = parse_event(ev, sport)
-        if parsed:
-            rows.append(parsed)
-    return rows, int(left) if left else None
 
 
 def fetch_bulletin_odds_api():
@@ -243,23 +207,87 @@ def fetch_bulletin_odds_api():
         print("ODDS_API_KEY yok")
         return pd.DataFrame()
     rows = []
-    left = None
     for sport in SPORTS_CORE:
-        part, left = pull_sport(sport, "h2h,totals")
-        rows.extend(part)
-        if left is not None and left < 40:
-            break
-    if left is None or left >= 80:
-        for sport in SPORTS_EXTRA:
-            part, left = pull_sport(sport, "h2h")
-            rows.extend(part)
-            if left is not None and left < 40:
+        try:
+            r = requests.get(
+                f"https://api.the-odds-api.com/v4/sports/{sport}/odds",
+                params={
+                    "apiKey": ODDS_API_KEY,
+                    "regions": "uk",
+                    "markets": "h2h,totals",
+                    "oddsFormat": "decimal",
+                },
+                timeout=25,
+            )
+            print("odds api", sport, r.status_code, "left", r.headers.get("x-requests-remaining"))
+            if r.status_code != 200:
+                continue
+            left = r.headers.get("x-requests-remaining")
+            for ev in r.json():
+                parsed = parse_event(ev, sport)
+                if parsed:
+                    rows.append(parsed)
+            if left is not None and int(left) < 40:
                 break
+        except Exception as e:
+            print("odds sport hata", sport, e)
     if not rows:
         return pd.DataFrame()
-    fx = pd.DataFrame(rows).drop_duplicates(subset=["HomeTeam", "AwayTeam"])
-    print("odds api maç", len(fx))
-    return fx
+    return pd.DataFrame(rows).drop_duplicates(subset=["HomeTeam", "AwayTeam"])
+
+
+def parse_any_date(val):
+    s = str(val)
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(s[:10], fmt).date()
+        except Exception:
+            continue
+    return None
+
+
+def fetch_bulletin_soccerbets(only_today=True):
+    try:
+        r = requests.get(SOCCERBETS_URL, timeout=30)
+        if r.status_code != 200 or len(r.content) < 80:
+            print("soccerbets bos", r.status_code, len(r.content))
+            return pd.DataFrame()
+        df = pd.read_csv(pd.io.common.StringIO(r.text))
+        df.columns = [c.strip() for c in df.columns]
+        home_c = pick_col(df, ["Home Team", "HomeTeam", "Home"])
+        away_c = pick_col(df, ["Away Team", "AwayTeam", "Away"])
+        h_c = pick_col(df, ["Pinnacle Home", "Home Odds", "H"])
+        d_c = pick_col(df, ["Pinnacle Draw", "Draw Odds", "D"])
+        a_c = pick_col(df, ["Pinnacle Away", "Away Odds", "A"])
+        date_c = pick_col(df, ["Date"])
+        if not all([home_c, away_c, h_c, d_c, a_c]):
+            print("soccerbets kolon yok", list(df.columns))
+            return pd.DataFrame()
+        out = pd.DataFrame({
+            "Date": df[date_c] if date_c else today_str(),
+            "HomeTeam": df[home_c],
+            "AwayTeam": df[away_c],
+            "H": pd.to_numeric(df[h_c], errors="coerce"),
+            "D": pd.to_numeric(df[d_c], errors="coerce"),
+            "A": pd.to_numeric(df[a_c], errors="coerce"),
+            "O25": np.nan,
+            "Div": df[pick_col(df, ["League", "Div"])] if pick_col(df, ["League", "Div"]) else "SB",
+            "kaynak": "soccerbets",
+        })
+        hg = pick_col(df, ["Home Score", "FTHG"])
+        ag = pick_col(df, ["Away Score", "FTAG"])
+        if hg and ag:
+            out["FTHG"] = pd.to_numeric(df[hg], errors="coerce")
+            out["FTAG"] = pd.to_numeric(df[ag], errors="coerce")
+        if only_today and date_c:
+            mask = out["Date"].map(parse_any_date) == today_date()
+            out = out[mask]
+        out = out.dropna(subset=["H", "D", "A", "HomeTeam", "AwayTeam"])
+        print("soccerbets maç", len(out))
+        return out.reset_index(drop=True)
+    except Exception as e:
+        print("soccerbets hata", e)
+        return pd.DataFrame()
 
 
 def fetch_bulletin_fixtures():
@@ -269,46 +297,22 @@ def fetch_bulletin_fixtures():
     fx = standardize(fx)
     fx = fx.dropna(subset=["H", "D", "A", "HomeTeam", "AwayTeam"])
     fx = fx[fx["Date"].astype(str) == today_str()].copy()
+    fx["kaynak"] = "fixtures_csv"
+    print("fixtures maç", len(fx))
     return fx.reset_index(drop=True)
 
 
 def fetch_bulletin():
     fx = fetch_bulletin_odds_api()
     if fx is not None and len(fx) > 0:
+        print("kaynak odds_api", len(fx))
         return fx.reset_index(drop=True)
-    print("odds api boş, fixtures.csv yedek")
+    fx = fetch_bulletin_soccerbets(only_today=True)
+    if fx is not None and len(fx) > 0:
+        print("kaynak soccerbets", len(fx))
+        return fx.reset_index(drop=True)
+    print("yedek fixtures.csv")
     return fetch_bulletin_fixtures()
-
-
-def fetch_finished_current_season():
-    frames = []
-    for code in LEAGUES:
-        url = f"https://www.football-data.co.uk/mmz4281/{SEASON}/{code}.csv"
-        try:
-            r = requests.get(url, timeout=20)
-            if r.status_code != 200 or len(r.content) < 400:
-                continue
-            df = pd.read_csv(pd.io.common.StringIO(r.text), low_memory=False)
-            df = standardize(df)
-            if "FTR" in df.columns:
-                df = df[df["FTR"].isin(["H", "D", "A"])]
-            if len(df):
-                frames.append(df)
-        except Exception:
-            continue
-    if not frames:
-        return pd.DataFrame()
-    out = pd.concat(frames, ignore_index=True)
-    if os.path.exists(LIVE_FILE):
-        old = read_csv_flex(LIVE_FILE)
-        if old is not None and len(old):
-            out = pd.concat([standardize(old), out], ignore_index=True)
-    cols = [c for c in ["Date", "HomeTeam", "AwayTeam"] if c in out.columns]
-    if len(cols) == 3:
-        out = out.drop_duplicates(subset=cols, keep="last")
-    os.makedirs(DATA_DIR, exist_ok=True)
-    out.to_csv(LIVE_FILE, index=False)
-    return out
 
 
 def neighbor_stats(hist, row):
@@ -388,14 +392,13 @@ def scan_signals(hist):
         send_telegram(f"❌ Bülten okunamadı: {e}")
         return
     if hist is None or len(hist) == 0:
-        send_telegram("❌ Tarihsel data okunamadı. futbol_data klasörünü kontrol et.")
+        send_telegram("❌ Tarihsel data okunamadı.")
         return
     if len(fx) == 0:
         send_telegram(f"⚠️ {today_str()} için oranlı maç yok.")
         return
 
-    rows = []
-    blocks = []
+    rows, blocks = [], []
     for _, m in fx.iterrows():
         st = neighbor_stats(hist, m)
         if not st:
@@ -404,22 +407,26 @@ def scan_signals(hist):
             "Date": today_str(),
             "HomeTeam": m["HomeTeam"],
             "AwayTeam": m["AwayTeam"],
+            "home_n": norm_name(m["HomeTeam"]),
+            "away_n": norm_name(m["AwayTeam"]),
             "H": m["H"], "D": m["D"], "A": m["A"], "O25": m.get("O25"),
             "mesafe": st["mesafe"],
             "sinyal": st["sinyal"],
             "sinyal_pct": st["sinyal_pct"],
+            "kaynak": m.get("kaynak", ""),
         })
         blocks.append((st["mesafe"], fmt_match(m, st), st))
 
     if not blocks:
-        send_telegram("⚠️ Bugün analiz edilecek oranlı maç bulunamadı.")
+        send_telegram("⚠️ Analiz edilecek maç yok.")
         return
 
     blocks.sort(key=lambda x: x[0])
     top = blocks[:20]
+    src = str(fx.get("kaynak", pd.Series(["?"])).iloc[0]) if "kaynak" in fx.columns else "?"
     lines = [
         f"📊 {today_str()} Otomatik Sinyal",
-        f"Bülten: {len(blocks)} maç",
+        f"Bülten: {len(blocks)} maç | kaynak: {src}",
         f"Tarihsel data: {len(hist)} maç",
         "",
     ]
@@ -435,6 +442,95 @@ def scan_signals(hist):
     pd.DataFrame(rows).to_csv(SIGNALS_FILE, index=False)
 
 
+def results_from_soccerbets():
+    df = fetch_bulletin_soccerbets(only_today=False)
+    if df is None or len(df) == 0 or "FTHG" not in df.columns:
+        return pd.DataFrame()
+    df = df.dropna(subset=["FTHG", "FTAG"])
+    df["home_n"] = df["HomeTeam"].map(norm_name)
+    df["away_n"] = df["AwayTeam"].map(norm_name)
+    df["FTR"] = np.where(df["FTHG"] > df["FTAG"], "H", np.where(df["FTHG"] < df["FTAG"], "A", "D"))
+    df["Over25"] = ((df["FTHG"] + df["FTAG"]) > 2.5).astype(float)
+    df["BTTS"] = ((df["FTHG"] > 0) & (df["FTAG"] > 0)).astype(float)
+    return df
+
+
+def results_from_football_data():
+    frames = []
+    for code in LEAGUES:
+        url = f"https://www.football-data.co.uk/mmz4281/{SEASON}/{code}.csv"
+        try:
+            r = requests.get(url, timeout=20)
+            if r.status_code != 200 or len(r.content) < 400:
+                continue
+            df = standardize(pd.read_csv(pd.io.common.StringIO(r.text), low_memory=False))
+            if "FTR" in df.columns:
+                df = df[df["FTR"].isin(["H", "D", "A"])]
+            if len(df):
+                frames.append(df)
+        except Exception:
+            continue
+    if not frames:
+        return pd.DataFrame()
+    out = pd.concat(frames, ignore_index=True)
+    out["home_n"] = out["HomeTeam"].map(norm_name)
+    out["away_n"] = out["AwayTeam"].map(norm_name)
+    return out
+
+
+def results_from_odds_scores():
+    if not ODDS_API_KEY:
+        return pd.DataFrame()
+    rows = []
+    for sport in SPORTS_CORE:
+        try:
+            r = requests.get(
+                f"https://api.the-odds-api.com/v4/sports/{sport}/scores",
+                params={"apiKey": ODDS_API_KEY, "daysFrom": 1},
+                timeout=25,
+            )
+            if r.status_code != 200:
+                continue
+            left = r.headers.get("x-requests-remaining")
+            for ev in r.json():
+                if not ev.get("completed"):
+                    continue
+                scores = {s.get("name"): s.get("score") for s in ev.get("scores") or []}
+                hg = pd.to_numeric(scores.get(ev.get("home_team")), errors="coerce")
+                ag = pd.to_numeric(scores.get(ev.get("away_team")), errors="coerce")
+                if pd.isna(hg) or pd.isna(ag):
+                    continue
+                rows.append({
+                    "HomeTeam": ev.get("home_team"),
+                    "AwayTeam": ev.get("away_team"),
+                    "home_n": norm_name(ev.get("home_team")),
+                    "away_n": norm_name(ev.get("away_team")),
+                    "FTHG": float(hg),
+                    "FTAG": float(ag),
+                    "FTR": "H" if hg > ag else ("A" if hg < ag else "D"),
+                    "Over25": float((hg + ag) > 2.5),
+                    "BTTS": float((hg > 0) and (ag > 0)),
+                })
+            if left is not None and int(left) < 30:
+                break
+        except Exception as e:
+            print("scores hata", sport, e)
+    return pd.DataFrame(rows) if rows else pd.DataFrame()
+
+
+def collect_results():
+    parts = [results_from_soccerbets(), results_from_football_data(), results_from_odds_scores()]
+    parts = [p for p in parts if p is not None and len(p)]
+    if not parts:
+        return pd.DataFrame()
+    out = pd.concat(parts, ignore_index=True)
+    out = out.dropna(subset=["home_n", "away_n", "FTR"])
+    out = out.drop_duplicates(subset=["home_n", "away_n"], keep="last")
+    os.makedirs(DATA_DIR, exist_ok=True)
+    out.to_csv(LIVE_FILE, index=False)
+    return out
+
+
 def signal_hit(sig, row):
     if sig == "Home":
         return row.get("FTR") == "H"
@@ -448,14 +544,11 @@ def signal_hit(sig, row):
 
 
 def update_and_review(hist):
-    finished = fetch_finished_current_season()
+    finished = collect_results()
     n_all = 0 if finished is None else len(finished)
-    today = today_str()
-    day = finished[finished["Date"].astype(str) == today] if n_all else pd.DataFrame()
     lines = [
-        f"📌 {today} Gün Sonu Raporu",
-        f"Dataya işlenen bitmiş maç: {n_all}",
-        f"Bu güne ait biten maç: {0 if day is None else len(day)}",
+        f"📌 {today_str()} Gün Sonu Raporu",
+        f"Skor havuzu: {n_all}",
         "",
     ]
     if not os.path.exists(SIGNALS_FILE):
@@ -467,11 +560,14 @@ def update_and_review(hist):
         lines.append("Sabah sinyal dosyası boş.")
         send_telegram("\n".join(lines))
         return
+    if "home_n" not in sig.columns:
+        sig["home_n"] = sig["HomeTeam"].map(norm_name)
+        sig["away_n"] = sig["AwayTeam"].map(norm_name)
     if finished is None or len(finished) == 0:
-        lines.append("Kaynakta bitmiş maç yok.")
+        lines.append("Hiçbir kaynakta skor yok.")
         send_telegram("\n".join(lines))
         return
-    merged = sig.merge(finished, on=["HomeTeam", "AwayTeam"], how="left", suffixes=("", "_res"))
+    merged = sig.merge(finished, on=["home_n", "away_n"], how="left", suffixes=("", "_res"))
     ok = wait = miss = 0
     lines.append("Sabah sinyalleri vs sonuç")
     for _, r in merged.iterrows():
@@ -483,7 +579,7 @@ def update_and_review(hist):
             continue
         hit = signal_hit(sig_name, r)
         skor = ""
-        if "FTHG" in r and pd.notna(r.get("FTHG")):
+        if pd.notna(r.get("FTHG")):
             skor = f" ({int(r['FTHG'])}-{int(r['FTAG'])})"
         if hit:
             ok += 1
