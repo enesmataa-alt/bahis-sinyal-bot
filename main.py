@@ -2,7 +2,7 @@ import os
 import glob
 import zipfile
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -108,9 +108,11 @@ def standardize(df):
         out["FTAG"] = pd.to_numeric(out["FTAG"], errors="coerce")
         out["Over25"] = ((out["FTHG"] + out["FTAG"]) > 2.5).astype(float)
         out["BTTS"] = ((out["FTHG"] > 0) & (out["FTAG"] > 0)).astype(float)
-        out["FTR"] = np.where(out["FTHG"] > out["FTAG"], "H",
-                       np.where(out["FTHG"] < out["FTAG"], "A",
-                       np.where(out["FTHG"].notna(), "D", np.nan)))
+        out["FTR"] = np.where(
+            out["FTHG"] > out["FTAG"], "H",
+            np.where(out["FTHG"] < out["FTAG"], "A",
+                     np.where(out["FTHG"].notna(), "D", np.nan)),
+        )
     if "HomeTeam" not in out.columns and "Home" in out.columns:
         out["HomeTeam"] = out["Home"]
     if "AwayTeam" not in out.columns and "Away" in out.columns:
@@ -222,11 +224,11 @@ def fetch_bulletin_odds_api():
             print("odds api", sport, r.status_code, "left", r.headers.get("x-requests-remaining"))
             if r.status_code != 200:
                 continue
-            left = r.headers.get("x-requests-remaining")
             for ev in r.json():
                 parsed = parse_event(ev, sport)
                 if parsed:
                     rows.append(parsed)
+            left = r.headers.get("x-requests-remaining")
             if left is not None and int(left) < 40:
                 break
         except Exception as e:
@@ -280,8 +282,7 @@ def fetch_bulletin_soccerbets(only_today=True):
             out["FTHG"] = pd.to_numeric(df[hg], errors="coerce")
             out["FTAG"] = pd.to_numeric(df[ag], errors="coerce")
         if only_today and date_c:
-            mask = out["Date"].map(parse_any_date) == today_date()
-            out = out[mask]
+            out = out[out["Date"].map(parse_any_date) == today_date()]
         out = out.dropna(subset=["H", "D", "A", "HomeTeam", "AwayTeam"])
         print("soccerbets maç", len(out))
         return out.reset_index(drop=True)
@@ -291,28 +292,51 @@ def fetch_bulletin_soccerbets(only_today=True):
 
 
 def fetch_bulletin_fixtures():
-    r = requests.get(FIXTURES_URL, timeout=30)
-    r.raise_for_status()
-    fx = pd.read_csv(pd.io.common.StringIO(r.text))
-    fx = standardize(fx)
-    fx = fx.dropna(subset=["H", "D", "A", "HomeTeam", "AwayTeam"])
-    fx = fx[fx["Date"].astype(str) == today_str()].copy()
-    fx["kaynak"] = "fixtures_csv"
-    print("fixtures maç", len(fx))
-    return fx.reset_index(drop=True)
+    try:
+        r = requests.get(FIXTURES_URL, timeout=30)
+        r.raise_for_status()
+        fx = pd.read_csv(pd.io.common.StringIO(r.text))
+        fx = standardize(fx)
+        fx = fx.dropna(subset=["H", "D", "A", "HomeTeam", "AwayTeam"])
+        fx = fx[fx["Date"].astype(str) == today_str()].copy()
+        fx["kaynak"] = "fixtures_csv"
+        print("fixtures maç", len(fx))
+        return fx.reset_index(drop=True)
+    except Exception as e:
+        print("fixtures hata", e)
+        return pd.DataFrame()
+
+
+def merge_matches(*frames, how="bulletin"):
+    parts = [f.copy() for f in frames if f is not None and len(f)]
+    if not parts:
+        return pd.DataFrame()
+    out = pd.concat(parts, ignore_index=True)
+    out["home_n"] = out["HomeTeam"].map(norm_name)
+    out["away_n"] = out["AwayTeam"].map(norm_name)
+    out["_o25"] = out["O25"].notna().astype(int) if "O25" in out.columns else 0
+    rank = {"odds_api": 0, "fixtures_csv": 1, "soccerbets": 2}
+    src = out["kaynak"] if "kaynak" in out.columns else pd.Series(["z"] * len(out))
+    out["_src"] = src.map(lambda s: rank.get(s, 9))
+    if how == "result":
+        out["_ok"] = out["FTR"].isin(["H", "D", "A"]).astype(int) if "FTR" in out.columns else 0
+        out = out.sort_values(["_ok", "_src"], ascending=[False, True])
+    else:
+        out = out.sort_values(["_o25", "_src"], ascending=[False, True])
+    out = out.drop_duplicates(subset=["home_n", "away_n"], keep="first")
+    drop_cols = [c for c in ["_o25", "_src", "_ok"] if c in out.columns]
+    return out.drop(columns=drop_cols).reset_index(drop=True)
 
 
 def fetch_bulletin():
-    fx = fetch_bulletin_odds_api()
-    if fx is not None and len(fx) > 0:
-        print("kaynak odds_api", len(fx))
-        return fx.reset_index(drop=True)
-    fx = fetch_bulletin_soccerbets(only_today=True)
-    if fx is not None and len(fx) > 0:
-        print("kaynak soccerbets", len(fx))
-        return fx.reset_index(drop=True)
-    print("yedek fixtures.csv")
-    return fetch_bulletin_fixtures()
+    fx = merge_matches(
+        fetch_bulletin_odds_api(),
+        fetch_bulletin_soccerbets(only_today=True),
+        fetch_bulletin_fixtures(),
+        how="bulletin",
+    )
+    print("birlesik bulten", 0 if fx is None else len(fx))
+    return fx
 
 
 def neighbor_stats(hist, row):
@@ -394,7 +418,7 @@ def scan_signals(hist):
     if hist is None or len(hist) == 0:
         send_telegram("❌ Tarihsel data okunamadı.")
         return
-    if len(fx) == 0:
+    if fx is None or len(fx) == 0:
         send_telegram(f"⚠️ {today_str()} için oranlı maç yok.")
         return
 
@@ -423,10 +447,10 @@ def scan_signals(hist):
 
     blocks.sort(key=lambda x: x[0])
     top = blocks[:20]
-    src = str(fx.get("kaynak", pd.Series(["?"])).iloc[0]) if "kaynak" in fx.columns else "?"
+    srcs = sorted({str(r.get("kaynak", "?")) for r in rows})
     lines = [
         f"📊 {today_str()} Otomatik Sinyal",
-        f"Bülten: {len(blocks)} maç | kaynak: {src}",
+        f"Bülten: {len(blocks)} maç | kaynak: {', '.join(srcs)}",
         f"Tarihsel data: {len(hist)} maç",
         "",
     ]
@@ -446,12 +470,13 @@ def results_from_soccerbets():
     df = fetch_bulletin_soccerbets(only_today=False)
     if df is None or len(df) == 0 or "FTHG" not in df.columns:
         return pd.DataFrame()
-    df = df.dropna(subset=["FTHG", "FTAG"])
+    df = df.dropna(subset=["FTHG", "FTAG"]).copy()
     df["home_n"] = df["HomeTeam"].map(norm_name)
     df["away_n"] = df["AwayTeam"].map(norm_name)
     df["FTR"] = np.where(df["FTHG"] > df["FTAG"], "H", np.where(df["FTHG"] < df["FTAG"], "A", "D"))
     df["Over25"] = ((df["FTHG"] + df["FTAG"]) > 2.5).astype(float)
     df["BTTS"] = ((df["FTHG"] > 0) & (df["FTAG"] > 0)).astype(float)
+    df["kaynak"] = "soccerbets"
     return df
 
 
@@ -475,6 +500,7 @@ def results_from_football_data():
     out = pd.concat(frames, ignore_index=True)
     out["home_n"] = out["HomeTeam"].map(norm_name)
     out["away_n"] = out["AwayTeam"].map(norm_name)
+    out["kaynak"] = "football_data"
     return out
 
 
@@ -491,7 +517,6 @@ def results_from_odds_scores():
             )
             if r.status_code != 200:
                 continue
-            left = r.headers.get("x-requests-remaining")
             for ev in r.json():
                 if not ev.get("completed"):
                     continue
@@ -510,7 +535,9 @@ def results_from_odds_scores():
                     "FTR": "H" if hg > ag else ("A" if hg < ag else "D"),
                     "Over25": float((hg + ag) > 2.5),
                     "BTTS": float((hg > 0) and (ag > 0)),
+                    "kaynak": "odds_api",
                 })
+            left = r.headers.get("x-requests-remaining")
             if left is not None and int(left) < 30:
                 break
         except Exception as e:
@@ -519,13 +546,14 @@ def results_from_odds_scores():
 
 
 def collect_results():
-    parts = [results_from_soccerbets(), results_from_football_data(), results_from_odds_scores()]
-    parts = [p for p in parts if p is not None and len(p)]
-    if not parts:
+    out = merge_matches(
+        results_from_soccerbets(),
+        results_from_football_data(),
+        results_from_odds_scores(),
+        how="result",
+    )
+    if out is None or len(out) == 0:
         return pd.DataFrame()
-    out = pd.concat(parts, ignore_index=True)
-    out = out.dropna(subset=["home_n", "away_n", "FTR"])
-    out = out.drop_duplicates(subset=["home_n", "away_n"], keep="last")
     os.makedirs(DATA_DIR, exist_ok=True)
     out.to_csv(LIVE_FILE, index=False)
     return out
