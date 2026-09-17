@@ -443,7 +443,7 @@ def scan_signals(hist):
             continue
         if st["sinyal_pct"] < MIN_SIGNAL:
             continue
-        rec = {
+        rows.append({
             "Date": today_str(),
             "HomeTeam": m["HomeTeam"],
             "AwayTeam": m["AwayTeam"],
@@ -454,8 +454,7 @@ def scan_signals(hist):
             "sinyal": st["sinyal"],
             "sinyal_pct": st["sinyal_pct"],
             "kaynak": m.get("kaynak", ""),
-        }
-        rows.append(rec)
+        })
         blocks.append((st["sinyal_pct"], -st["mesafe"], fmt_match(m, st), st))
 
     if not blocks:
@@ -533,9 +532,10 @@ def results_from_odds_scores():
         try:
             r = requests.get(
                 f"https://api.the-odds-api.com/v4/sports/{sport}/scores",
-                params={"apiKey": ODDS_API_KEY, "daysFrom": 1},
+                params={"apiKey": ODDS_API_KEY, "daysFrom": 3},
                 timeout=25,
             )
+            print("scores", sport, r.status_code, "left", r.headers.get("x-requests-remaining"))
             if r.status_code != 200:
                 continue
             for ev in r.json():
@@ -559,10 +559,11 @@ def results_from_odds_scores():
                     "kaynak": "odds_api",
                 })
             left = r.headers.get("x-requests-remaining")
-            if left is not None and int(left) < 30:
+            if left is not None and int(left) < 10:
                 break
         except Exception as e:
             print("scores hata", sport, e)
+    print("scores maç", len(rows))
     return pd.DataFrame(rows) if rows else pd.DataFrame()
 
 
@@ -601,7 +602,7 @@ def update_and_review(hist):
         "",
     ]
     if not os.path.exists(SIGNALS_FILE):
-        lines.append("Sabah sinyal dosyası yok.")
+        lines.append("Sabah sinyal dosyası yok. Önce scan çalışmalı ve dosya commit edilmeli.")
         send_telegram("\n".join(lines))
         return
     sig = read_csv_flex(SIGNALS_FILE)
@@ -613,7 +614,7 @@ def update_and_review(hist):
         sig["home_n"] = sig["HomeTeam"].map(norm_name)
         sig["away_n"] = sig["AwayTeam"].map(norm_name)
     if finished is None or len(finished) == 0:
-        lines.append("Hiçbir kaynakta skor yok.")
+        lines.append("Hiçbir kaynakta skor yok. 08:00 TR turunda tekrar dener.")
         send_telegram("\n".join(lines))
         return
     merged = sig.merge(finished, on=["home_n", "away_n"], how="left", suffixes=("", "_res"))
