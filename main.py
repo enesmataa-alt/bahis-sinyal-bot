@@ -13,6 +13,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 ODDS_API_KEY = os.getenv("ODDS_API_KEY", "")
 MODE = os.getenv("MODE", "scan").strip().lower()
+MIN_SIGNAL = 60.0
 
 SEASON = "2627"
 LEAGUES = [
@@ -58,9 +59,14 @@ def today_date():
 
 def norm_name(x):
     s = str(x or "").lower()
+    s = s.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
+    s = s.replace("ñ", "n").replace("ü", "u").replace("ö", "o").replace("ä", "a")
     s = re.sub(r"[^a-z0-9]+", " ", s)
-    for w in ("fc", "cf", "afc", "sc", "cd", "ud", "ac", "as", "the"):
+    for w in ("fc", "cf", "afc", "sc", "cd", "ud", "ac", "as", "the", "ca", "rc", "sk", "nk", "fk"):
         s = re.sub(rf"\b{w}\b", " ", s)
+    s = s.replace("ath madrid", "atletico madrid")
+    s = s.replace("atletico de madrid", "atletico madrid")
+    s = s.replace("espanol", "espanyol")
     return " ".join(s.split())
 
 
@@ -260,7 +266,7 @@ def fetch_bulletin_soccerbets(only_today=True):
     try:
         r = requests.get(SOCCERBETS_URL, timeout=30)
         if r.status_code != 200 or len(r.content) < 80:
-            print("soccerbets bos", r.status_code, len(r.content))
+            print("soccerbets bos", r.status_code)
             return pd.DataFrame()
         df = pd.read_csv(pd.io.common.StringIO(r.text))
         df.columns = [c.strip() for c in df.columns]
@@ -435,7 +441,9 @@ def scan_signals(hist):
         st = neighbor_stats(hist, m)
         if not st:
             continue
-        rows.append({
+        if st["sinyal_pct"] < MIN_SIGNAL:
+            continue
+        rec = {
             "Date": today_str(),
             "HomeTeam": m["HomeTeam"],
             "AwayTeam": m["AwayTeam"],
@@ -446,29 +454,34 @@ def scan_signals(hist):
             "sinyal": st["sinyal"],
             "sinyal_pct": st["sinyal_pct"],
             "kaynak": m.get("kaynak", ""),
-        })
-        blocks.append((st["mesafe"], fmt_match(m, st), st))
+        }
+        rows.append(rec)
+        blocks.append((st["sinyal_pct"], -st["mesafe"], fmt_match(m, st), st))
 
     if not blocks:
-        send_telegram("⚠️ Analiz edilecek maç yok.")
+        send_telegram(
+            f"📊 {today_str()}\n"
+            f"Taranan: {len(fx)} maç\n"
+            f"%{int(MIN_SIGNAL)} üstü sinyal yok."
+        )
         return
 
-    blocks.sort(key=lambda x: x[0])
-    top = blocks[:20]
+    blocks.sort(key=lambda x: (x[0], x[1]), reverse=True)
     srcs = sorted({str(r.get("kaynak", "?")) for r in rows})
     lines = [
         f"📊 {today_str()} Otomatik Sinyal",
-        f"Bülten: {len(blocks)} maç | kaynak: {', '.join(srcs)}",
+        f"Taranan: {len(fx)} maç | gönderilen: {len(blocks)} (eşik %{int(MIN_SIGNAL)})",
+        f"kaynak: {', '.join(srcs)}",
         f"Tarihsel data: {len(hist)} maç",
         "",
     ]
-    for _, txt, _ in top:
+    for _, __, txt, ___ in blocks:
         lines.append(txt)
         lines.append("")
-    lines.append("En net 5 sinyal")
-    for i, (dist, txt, st) in enumerate(top[:5], 1):
+    lines.append(f"En yüksek {min(5, len(blocks))} sinyal")
+    for i, (pct, negd, txt, st) in enumerate(blocks[:5], 1):
         name = txt.split("\n")[0].replace("<b>", "").replace("</b>", "")
-        lines.append(f"{i}. {name} → {st['sinyal']} %{st['sinyal_pct']} (mesafe {dist})")
+        lines.append(f"{i}. {name} → {st['sinyal']} %{st['sinyal_pct']} (mesafe {st['mesafe']})")
     send_telegram("\n".join(lines))
     os.makedirs(DATA_DIR, exist_ok=True)
     pd.DataFrame(rows).to_csv(SIGNALS_FILE, index=False)
@@ -605,7 +618,7 @@ def update_and_review(hist):
         return
     merged = sig.merge(finished, on=["home_n", "away_n"], how="left", suffixes=("", "_res"))
     ok = wait = miss = 0
-    lines.append("Sabah sinyalleri vs sonuç")
+    lines.append("Sabah sinyalleri vs sonuç (%60+)")
     for _, r in merged.iterrows():
         name = f"{r['HomeTeam']} - {r['AwayTeam']}"
         sig_name = str(r.get("sinyal", ""))
