@@ -150,7 +150,7 @@ def load_local_history():
         csv_paths.extend(glob.glob(os.path.join(root, "**", "*.csv"), recursive=True))
     for path in csv_paths:
         name = os.path.basename(path).lower()
-        if name in ("son_sinyaller.csv", "canli_eklenen.csv"):
+        if name == "son_sinyaller.csv":
             continue
         df = read_csv_flex(path)
         if df is None or len(df) == 0:
@@ -576,8 +576,6 @@ def collect_results():
     )
     if out is None or len(out) == 0:
         return pd.DataFrame()
-    os.makedirs(DATA_DIR, exist_ok=True)
-    out.to_csv(LIVE_FILE, index=False)
     return out
 
 
@@ -593,6 +591,42 @@ def signal_hit(sig, row):
     return False
 
 
+def grow_history(merged):
+    need = ["H", "D", "A", "FTR", "FTHG", "FTAG"]
+    if merged is None or len(merged) == 0:
+        return 0
+    work = merged.copy()
+    if "FTR" not in work.columns and "FTR_res" in work.columns:
+        work["FTR"] = work["FTR_res"]
+    if "FTHG" not in work.columns and "FTHG_res" in work.columns:
+        work["FTHG"] = work["FTHG_res"]
+        work["FTAG"] = work["FTAG_res"]
+    work = work.dropna(subset=need)
+    if len(work) == 0:
+        return 0
+    work["Over25"] = ((work["FTHG"] + work["FTAG"]) > 2.5).astype(float)
+    work["BTTS"] = ((work["FTHG"] > 0) & (work["FTAG"] > 0)).astype(float)
+    cols = ["Date", "HomeTeam", "AwayTeam", "H", "D", "A", "O25",
+            "FTHG", "FTAG", "FTR", "Over25", "BTTS"]
+    for c in cols:
+        if c not in work.columns:
+            work[c] = np.nan
+    add = work[cols].copy()
+    add["home_n"] = add["HomeTeam"].map(norm_name)
+    add["away_n"] = add["AwayTeam"].map(norm_name)
+    os.makedirs(DATA_DIR, exist_ok=True)
+    if os.path.exists(LIVE_FILE):
+        old = read_csv_flex(LIVE_FILE)
+        if old is not None and len(old):
+            if "home_n" not in old.columns:
+                old["home_n"] = old["HomeTeam"].map(norm_name)
+                old["away_n"] = old["AwayTeam"].map(norm_name)
+            add = pd.concat([old, add], ignore_index=True)
+    add = add.drop_duplicates(subset=["home_n", "away_n", "Date"], keep="last")
+    add.to_csv(LIVE_FILE, index=False)
+    return len(work)
+
+
 def update_and_review(hist):
     finished = collect_results()
     n_all = 0 if finished is None else len(finished)
@@ -602,7 +636,7 @@ def update_and_review(hist):
         "",
     ]
     if not os.path.exists(SIGNALS_FILE):
-        lines.append("Sabah sinyal dosyası yok. Önce scan çalışmalı ve dosya commit edilmeli.")
+        lines.append("Sabah sinyal dosyası yok.")
         send_telegram("\n".join(lines))
         return
     sig = read_csv_flex(SIGNALS_FILE)
@@ -614,10 +648,16 @@ def update_and_review(hist):
         sig["home_n"] = sig["HomeTeam"].map(norm_name)
         sig["away_n"] = sig["AwayTeam"].map(norm_name)
     if finished is None or len(finished) == 0:
-        lines.append("Hiçbir kaynakta skor yok. 08:00 TR turunda tekrar dener.")
+        lines.append("Hiçbir kaynakta skor yok.")
         send_telegram("\n".join(lines))
         return
     merged = sig.merge(finished, on=["home_n", "away_n"], how="left", suffixes=("", "_res"))
+    if "FTR" not in merged.columns and "FTR_res" in merged.columns:
+        merged["FTR"] = merged["FTR_res"]
+    if "FTHG" not in merged.columns and "FTHG_res" in merged.columns:
+        merged["FTHG"] = merged["FTHG_res"]
+        merged["FTAG"] = merged["FTAG_res"]
+    added = grow_history(merged)
     ok = wait = miss = 0
     lines.append("Sabah sinyalleri vs sonuç (%60+)")
     for _, r in merged.iterrows():
@@ -639,6 +679,7 @@ def update_and_review(hist):
             lines.append(f"❌ {name}{skor} → {sig_name} tutmadı")
     lines.append("")
     lines.append(f"Tuttu: {ok} | Tutmadı: {miss} | Bekleyen: {wait}")
+    lines.append(f"Tarihsele eklenen bitmiş maç: {added}")
     send_telegram("\n".join(lines))
 
 
