@@ -1,52 +1,84 @@
 Date,HomeTeam,AwayTeam,home_n,away_n,H,D,A,O25,mesafe,sinyal,sinyal_pct,kaynak
-17/09/2026,OFI Crete,TSG Hoffenheim,ofi crete,tsg hoffenheim,8.0,5.6,1.3,1.44,0.132,Over,69.8,odds_api
-17/09/2026,PFC Levski Sofia,Salzburg,pfc levski sofia,salzburg,3.55,3.75,2.2,1.64,0.127,BTTS,77.0,odds_api
-17/09/2026,Besiktas JK,Marseille,besiktas jk,marseille,1.85,4.2,4.4,1.54,0.151,Over,68.0,odds_api
-17/09/2026,Celtic,Ferencváros TC,celtic,ferencvaros tc,1.68,4.0,4.3,1.53,0.036,Over,66.8,odds_api
-17/09/2026,Crystal Palace,Lech Poznań,crystal palace,lech pozna,1.4,5.7,8.8,1.5,0.24,Home,69.5,odds_api
-17/09/2026,Juventus,NEC Nijmegen,juventus,nec nijmegen,1.16,7.5,13.0,1.4,0.0,Home,85.4,odds_api
-17/09/2026,Lillestrom,Torreense,lillestrom,torreense,1.6,4.1,4.8,1.62,0.079,Home,64.8,odds_api
-17/09/2026,Viktoria Plzeň,Union Saint-Gilloise,viktoria plze,union saint gilloise,2.56,3.7,2.9,1.68,0.127,BTTS,61.8,odds_api
-17/09/2026,Manchester City,Norwich City,manchester city,norwich city,1.06,9.0,15.0,1.2,0.082,Home,87.4,odds_api
-17/09/2026,Málaga,Villarreal,malaga,villarreal,3.6,3.75,1.95,1.6,0.01,BTTS,78.4,odds_api
-17/09/2026,Birmingham,New Mexico,birmingham,new mexico,2.38,3.66,2.81,,0.062,BTTS,61.4,soccerbets
-17/09/2026,Blooming,Universitario de Vinto,blooming,universitario de vinto,1.47,3.86,4.64,,0.182,Home,62.8,soccerbets
-17/09/2026,Boise,Charlotte Independ.,boise,charlotte independ,1.69,4.09,4.1,,0.108,Over,66.6,soccerbets
-17/09/2026,Denver Summit W,Bay FC W,denver summit w,bay w,1.65,3.9,4.63,,0.076,Over,64.5,soccerbets
-17/09/2026,Adelaide United,Tai Po,adelaide united,tai po,1.2,6.11,10.54,,0.366,Home,79.5,soccerbets
-17/09/2026,Lion City,Pathum United,lion city,pathum united,1.88,3.85,3.35,,0.132,BTTS,64.5,soccerbets
-17/09/2026,Machida,Svay Rieng,machida,svay rieng,1.13,6.38,12.06,,0.162,Home,82.6,soccerbets
-17/09/2026,Hong Kong W,Philippines W,hong kong w,philippines w,7.93,5.13,1.23,,0.171,Over,66.6,soccerbets
-17/09/2026,Kitchee,Gangwon,kitchee,gangwon,2.33,3.15,2.48,,0.231,BTTS,61.4,soccerbets
-17/09/2026,Shanghai Shenhua,Tampines,shanghai shenhua,tampines,1.31,5.11,7.12,,0.186,Home,74.5,soccerbets
-17/09/2026,Navbahor Namangan,Din. Samarkand,navbahor namangan,din samarkand,1.44,4.32,6.67,,0.181,Home,66.4,soccerbets
-17/09/2026,FC Astana,Kairat Almaty,astana,kairat almaty,2.59,3.3,2.41,,0.101,BTTS,65.4,soccerbets
-17/09/2026,Tekstilshtik,R. Volgograd,tekstilshtik,r volgograd,4.32,3.65,1.85,,0.055,BTTS,61.2,soccerbets
-17/09/2026,Atyrau,Ordabasy,atyrau,ordabasy,6.3,3.86,1.45,,0.224,Away,60.5,soccerbets
-17/09/2026,Levadia,Tammeka,levadia,tammeka,1.24,5.16,13.08,,0.121,Home,86.0,soccerbets
-17/09/2026,Hapoel Afula,Hapoel Kfar Shalem,hapoel afula,hapoel kfar shalem,2.48,3.42,2.52,,0.041,Over,67.4,soccerbets
-17/09/2026,H. Raanana,Kiryat Gat,h raanana,kiryat gat,1.95,3.38,3.51,,0.022,BTTS,63.8,soccerbets
-17/09/2026,Kiryat Yam,Ironi Modiin,kiryat yam,ironi modiin,1.68,3.93,4.14,,0.1,Over,67.4,soccerbets
-17/09/2026,Maccabi Jaffa,Maccabi Bnei Raina,maccabi jaffa,maccabi bnei raina,3.62,3.6,1.86,,0.092,BTTS,66.4,soccerbets
-17/09/2026,MS Kafr Qasim,Hapoel Kfar Saba,ms kafr qasim,hapoel kfar saba,2.71,3.38,2.34,,0.06,BTTS,67.0,soccerbets
-17/09/2026,SC Ashdod,H. Ironi Rishon,ashdod,h ironi rishon,1.76,3.69,3.97,,0.068,BTTS,65.2,soccerbets
-17/09/2026,Pari NN,Leningradets,pari nn,leningradets,1.42,4.7,7.38,,0.132,Home,69.8,soccerbets
-17/09/2026,Torpedo Moscow,Veles Moscow,torpedo moscow,veles moscow,1.58,3.86,6.3,,0.065,Over,66.0,soccerbets
-17/09/2026,Skeid,Valerenga,skeid,valerenga,5.96,5.6,1.27,,0.391,Away,67.5,soccerbets
-17/09/2026,Vejle,Brondby,vejle,brondby,3.59,3.56,1.88,,0.081,BTTS,68.0,soccerbets
-17/09/2026,OFI Crete,Hoffenheim,ofi crete,hoffenheim,7.97,5.23,1.37,,0.037,Over,68.8,soccerbets
-17/09/2026,Eskilsminne,Tvaaker,eskilsminne,tvaaker,2.18,3.59,2.82,,0.105,BTTS,63.8,soccerbets
-17/09/2026,Rosengard,Trelleborg,rosengard,trelleborg,2.64,3.81,2.22,,0.07,BTTS,61.0,soccerbets
-17/09/2026,Skovde AIK,Trollhattan,skovde aik,trollhattan,2.6,3.65,2.31,,0.081,BTTS,65.0,soccerbets
-17/09/2026,Stockholm Internazionale,Stocksund,stockholm internazionale,stocksund,1.12,8.64,12.25,,0.688,Home,83.8,soccerbets
-17/09/2026,Enppi,Pyramids,enppi,pyramids,7.7,3.82,1.5,,0.269,Away,61.5,soccerbets
-17/09/2026,Jarfalla,Karlbergs,jarfalla,karlbergs,3.3,3.82,1.9,,0.102,BTTS,69.0,soccerbets
-17/09/2026,Orlando Pirates,Durban City,orlando pirates,durban city,1.33,4.39,10.25,,0.259,Home,71.6,soccerbets
-17/09/2026,Dynamo Makhachkala,CSKA Moscow,dynamo makhachkala,cska moscow,2.98,3.49,2.4,,0.055,BTTS,62.2,soccerbets
-17/09/2026,Zeleznicar Pancevo,Crvena zvezda,zeleznicar pancevo,crvena zvezda,6.3,4.61,1.4,,0.232,Over,69.4,soccerbets
-17/09/2026,Manchester City,Norwich,manchester city,norwich,1.1,10.75,20.41,,0.641,Home,87.8,soccerbets
-17/09/2026,AFC Wimbledon,MK Dons,wimbledon,mk dons,2.9,3.62,2.37,,0.036,BTTS,65.6,soccerbets
-17/09/2026,Besiktas,Marseille,besiktas,marseille,1.81,4.06,4.1,,0.085,Over,70.5,soccerbets
-17/09/2026,Celtic,Ferencvaros,celtic,ferencvaros,1.76,4.06,4.42,,0.075,Home,62.4,soccerbets
-17/09/2026,Crystal Palace,Lech Poznan,crystal palace,lech poznan,1.4,5.18,7.33,,0.188,Home,72.2,soccerbets
-17/09/2026,Juventus,Nijmegen,juventus,nijmegen,1.19,7.79,13.38,,0.435,Home,87.0,soccerbets
+18/09/2026,Brentford,Chelsea,brentford,chelsea,2.7,3.8,2.45,1.44,0.107,BTTS,65.4,odds_api
+18/09/2026,Espanyol,Elche CF,espanyol,elche,1.8,3.6,4.2,1.75,0.058,BTTS,63.0,odds_api
+18/09/2026,Monza,Sassuolo,monza,sassuolo,2.75,3.3,2.5,1.7,0.087,BTTS,67.4,odds_api
+18/09/2026,Bayern Munich,Union Berlin,bayern munich,union berlin,1.04,14.0,31.0,1.08,3.162,Home,90.0,odds_api
+18/09/2026,Groningen,FC Zwolle,groningen,zwolle,1.52,4.75,5.25,1.36,0.01,Home,60.5,odds_api
+18/09/2026,Albacete,Córdoba,albacete,cordoba,2.18,3.35,2.8,1.68,0.096,BTTS,68.2,odds_api
+18/09/2026,Montevideo City (Uru),Cienciano (Per),montevideo city uru,cienciano per,1.53,4.47,6.0,,0.042,Home,74.6,soccerbets
+18/09/2026,Flamengo RJ,Ind. del Valle,flamengo rj,ind del valle,1.31,5.48,9.83,,0.171,Home,76.4,soccerbets
+18/09/2026,Philippines U23,Vietnam U23,philippines u23,vietnam u23,8.21,5.01,1.3,,0.292,Over,66.6,soccerbets
+18/09/2026,Nordia Jerusalem,Jerusalem FC,nordia jerusalem,jerusalem,5.12,4.03,1.46,,0.173,Over,61.5,soccerbets
+18/09/2026,Osaka,Fukushima Utd,osaka,fukushima utd,1.76,3.71,3.95,,0.065,BTTS,61.4,soccerbets
+18/09/2026,Zaglebie II,Carina Gubin,zaglebie ii,carina gubin,1.36,4.57,5.72,,0.146,Home,69.2,soccerbets
+18/09/2026,Kuwait U23,Uzbekistan U23,kuwait u23,uzbekistan u23,23.98,5.65,1.15,,3.795,Away,76.0,soccerbets
+18/09/2026,M. Ironi Ashdod,Ironi Beit Shemesh,m ironi ashdod,ironi beit shemesh,2.15,3.4,2.74,,0.078,BTTS,64.5,soccerbets
+18/09/2026,Fleetwood U21,Swansea U21,fleetwood u21,swansea u21,3.73,4.53,1.66,,0.271,Over,65.0,soccerbets
+18/09/2026,Birmingham U21,Arsenal U21,birmingham u21,arsenal u21,4.29,5.0,1.52,,0.695,Away,68.2,soccerbets
+18/09/2026,Polissya Zhytomyr,Kryvbas,polissya zhytomyr,kryvbas,1.27,5.03,8.54,,0.078,Home,76.0,soccerbets
+18/09/2026,LKS Lomza,Zabki,lks lomza,zabki,2.36,3.66,2.2,,0.256,BTTS,62.4,soccerbets
+18/09/2026,Polkowice,Zaglebie Sosnowiec,polkowice,zaglebie sosnowiec,2.38,3.17,2.57,,0.147,BTTS,60.6,soccerbets
+18/09/2026,Hluk,Holesov,hluk,holesov,1.76,3.9,3.32,,0.19,BTTS,65.2,soccerbets
+18/09/2026,Sochi,SKA Khabarovsk,sochi,ska khabarovsk,1.43,4.67,6.92,,0.107,Home,73.5,soccerbets
+18/09/2026,BE1 NFA,Transinvest 2,be1 nfa,transinvest 2,1.3,4.93,6.46,,0.128,BTTS,60.0,soccerbets
+18/09/2026,Al Fujairah,Dibba Al Hisn,al fujairah,dibba al hisn,3.67,3.54,1.81,,0.092,BTTS,64.4,soccerbets
+18/09/2026,Dubai City,Al Arabi,dubai city,al arabi,5.4,4.14,1.47,,0.141,Over,60.2,soccerbets
+18/09/2026,Khenchela,Ben Aknoun,khenchela,ben aknoun,2.13,3.01,3.62,,0.073,BTTS,60.6,soccerbets
+18/09/2026,MO Bejaia,MO Constantine,mo bejaia,mo constantine,1.41,3.67,6.82,,0.217,Home,65.8,soccerbets
+18/09/2026,US Chaouia,Beni Oulbane,us chaouia,beni oulbane,1.24,4.52,10.89,,0.144,Home,75.2,soccerbets
+18/09/2026,Haka,Klubi 04,haka,klubi 04,1.46,4.85,5.56,,0.123,BTTS,60.4,soccerbets
+18/09/2026,JaPS,Ekenas,japs,ekenas,2.88,3.49,2.38,,0.017,BTTS,64.5,soccerbets
+18/09/2026,GrIFK,MuSa,grifk,musa,1.46,5.69,4.07,,1.214,Over,65.4,soccerbets
+18/09/2026,KPV Kokkola,KuPS Akatemia,kpv kokkola,kups akatemia,3.0,3.87,2.06,,0.112,BTTS,62.2,soccerbets
+18/09/2026,Qarabag,Safa Baku,qarabag,safa baku,1.11,8.56,15.9,,0.902,Home,88.4,soccerbets
+18/09/2026,Parnu JK Vaprus U21,Legion,parnu jk vaprus u21,legion,1.15,8.41,7.28,,2.427,Home,69.5,soccerbets
+18/09/2026,ML Vitebsk,Arsenal Dzerzhinsk,ml vitebsk,arsenal dzerzhinsk,1.13,7.16,14.05,,0.666,Home,88.0,soccerbets
+18/09/2026,Opava,FK Ceska Lipa,opava,ceska lipa,1.75,3.71,4.0,,0.04,BTTS,65.0,soccerbets
+18/09/2026,Prostejov,Dukla Prague,prostejov,dukla prague,3.4,3.39,1.99,,0.11,BTTS,62.0,soccerbets
+18/09/2026,Hlucin,Pusta Polom,hlucin,pusta polom,1.27,5.09,6.81,,0.247,Home,74.5,soccerbets
+18/09/2026,Karvina,Kromeriz,karvina,kromeriz,1.29,5.4,7.6,,0.142,Home,78.5,soccerbets
+18/09/2026,Noah,Van,noah,van,1.03,15.61,24.79,,2.877,Home,86.6,soccerbets
+18/09/2026,AC Oulu,Inter Turku,oulu,inter turku,4.49,3.68,1.83,,0.037,BTTS,62.5,soccerbets
+18/09/2026,Gnistan,HJK,gnistan,hjk,4.2,4.14,1.78,,0.085,Over,62.2,soccerbets
+18/09/2026,Kapfenberg,Amstetten,kapfenberg,amstetten,3.79,4.01,1.83,,0.014,BTTS,62.6,soccerbets
+18/09/2026,Wolfsburg,Darmstadt,wolfsburg,darmstadt,1.59,4.64,5.03,,0.253,Home,64.4,soccerbets
+18/09/2026,Hoffenheim W,Wolfsburg W,hoffenheim w,wolfsburg w,5.81,4.82,1.4,,0.206,Over,70.0,soccerbets
+18/09/2026,Mainz W,Eintracht Frankfurt W,mainz w,eintracht frankfurt w,13.69,9.36,1.1,,1.104,Away,75.5,soccerbets
+18/09/2026,Malmo FF W,Djurgarden W,malmo ff w,djurgarden w,1.38,4.65,6.67,,0.198,Over,64.2,soccerbets
+18/09/2026,F. Amager,Naestved,f amager,naestved,2.62,3.56,2.31,,0.072,BTTS,61.0,soccerbets
+18/09/2026,Nykobing,Hellerup,nykobing,hellerup,1.31,5.48,6.93,,0.246,Home,72.2,soccerbets
+18/09/2026,Roskilde,FA 2000,roskilde,fa 2000,1.54,4.15,4.91,,0.107,Home,64.4,soccerbets
+18/09/2026,Holbaek,Ringsted,holbaek,ringsted,1.27,5.56,6.9,,0.338,Home,70.5,soccerbets
+18/09/2026,FSV Frankfurt,Stutt. Kickers,fsv frankfurt,stutt kickers,2.78,3.46,2.26,,0.075,BTTS,62.0,soccerbets
+18/09/2026,Omonia 29th May,AEK Larnaca,omonia 29th may,aek larnaca,6.45,4.13,1.47,,0.084,Away,68.5,soccerbets
+18/09/2026,Pafos,AEL Limassol,pafos,ael limassol,1.41,4.37,6.94,,0.078,Home,68.5,soccerbets
+18/09/2026,Klaksvik,Skala Itrottarfelag,klaksvik,skala itrottarfelag,1.17,6.75,11.47,,0.533,Home,79.8,soccerbets
+18/09/2026,Wil,Stade Nyonnais,wil,stade nyonnais,1.68,3.99,4.43,,0.051,Home,62.4,soccerbets
+18/09/2026,SK Rapid,Tirol,rapid,tirol,1.34,5.78,7.87,,0.134,Home,75.4,soccerbets
+18/09/2026,Rudes,Slaven Belupo,rudes,slaven belupo,3.64,3.64,1.97,,0.06,BTTS,66.8,soccerbets
+18/09/2026,Almere City,Heracles,almere city,heracles,3.29,4.02,1.98,,0.03,BTTS,74.5,soccerbets
+18/09/2026,Den Bosch,Helmond,den bosch,helmond,1.7,4.37,4.13,,0.133,Over,70.8,soccerbets
+18/09/2026,Eindhoven FC,FC Emmen,eindhoven,emmen,3.42,3.91,1.96,,0.024,BTTS,76.0,soccerbets
+18/09/2026,Jong Ajax,Roda,jong ajax,roda,3.43,3.95,1.95,,0.058,BTTS,76.5,soccerbets
+18/09/2026,Jong AZ,FC Volendam,jong az,volendam,2.9,4.0,2.17,,0.122,BTTS,65.4,soccerbets
+18/09/2026,Waalwijk,Maastricht,waalwijk,maastricht,1.65,4.29,4.51,,0.091,Over,68.0,soccerbets
+18/09/2026,Manchester City W,Liverpool W,manchester city w,liverpool w,1.3,5.59,7.75,,0.266,Home,73.8,soccerbets
+18/09/2026,MC Alger,Rouisset,mc alger,rouisset,1.39,4.09,8.79,,0.229,Home,65.2,soccerbets
+18/09/2026,Leicester U21,West Ham U21,leicester u21,west ham u21,2.66,4.05,2.14,,0.166,BTTS,60.8,soccerbets
+18/09/2026,Manchester Utd U21,Brentford U21,manchester utd u21,brentford u21,1.5,5.08,4.39,,0.6,Over,60.4,soccerbets
+18/09/2026,Wisla,Slask Wroclaw,wisla,slask wroclaw,1.65,4.27,4.74,,0.061,Home,65.4,soccerbets
+18/09/2026,BW Linz,Admira,bw linz,admira,1.51,4.41,5.85,,0.135,Home,65.4,soccerbets
+18/09/2026,Derry City,Galway,derry city,galway,1.81,3.88,4.04,,0.09,BTTS,60.0,soccerbets
+18/09/2026,Dundalk,Shelbourne,dundalk,shelbourne,2.3,3.56,2.95,,0.064,BTTS,66.5,soccerbets
+18/09/2026,Bray,Treaty United,bray,treaty united,1.38,5.34,6.13,,0.221,Over,65.2,soccerbets
+18/09/2026,Cork City,UC Dublin,cork city,uc dublin,1.49,4.25,6.01,,0.052,Home,69.6,soccerbets
+18/09/2026,Ammanford,Penybont,ammanford,penybont,13.48,6.86,1.17,,0.5,Away,77.6,soccerbets
+18/09/2026,Briton Ferry,Trefelin,briton ferry,trefelin,1.57,4.16,4.99,,0.041,Home,62.8,soccerbets
+18/09/2026,Caernarfon,Cambrian United,caernarfon,cambrian united,1.42,4.85,6.04,,0.11,Over,72.8,soccerbets
+18/09/2026,Connahs Q.,Cardiff Metropolitan,connahs q,cardiff metropolitan,1.67,3.94,4.46,,0.075,Home,61.4,soccerbets
+18/09/2026,Haverfordwest,Holywell,haverfordwest,holywell,1.32,5.18,7.92,,0.107,Home,72.6,soccerbets
+18/09/2026,Bohemians,Drogheda,bohemians,drogheda,1.35,5.08,7.81,,0.191,Home,68.8,soccerbets
+18/09/2026,Shamrock Rovers,Waterford,shamrock rovers,waterford,1.5,4.47,5.86,,0.114,Over,71.0,soccerbets
+18/09/2026,Vila Nova FC,America MG,vila nova,america mg,1.44,4.21,7.62,,0.12,Home,73.0,soccerbets
+18/09/2026,Independiente,SA Bulo Bulo,independiente,sa bulo bulo,1.65,3.97,4.07,,0.086,Over,71.0,soccerbets
+18/09/2026,New York City,New York Red Bulls,new york city,new york red bulls,1.79,4.13,3.98,,0.083,Over,63.8,soccerbets
