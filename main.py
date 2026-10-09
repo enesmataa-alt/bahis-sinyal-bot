@@ -26,25 +26,53 @@ DATA_DIR = "futbol_data"
 SIGNALS_FILE = os.path.join(DATA_DIR, "son_sinyaller.csv")
 LIVE_FILE = os.path.join(DATA_DIR, "canli_eklenen.csv")
 FIXTURES_URL = "https://www.football-data.co.uk/fixtures.csv"
+FIXTURES_MIRRORS = [
+    "https://www.football-data.co.uk/fixtures.csv",
+    "https://football-data.co.uk/fixtures.csv",
+]
 SOCCERBETS_URL = "https://api.soccerbets.com/exports/matches-odds-export.csv"
 TR = ZoneInfo("Europe/Istanbul")
 
+SIGNAL_COLS = [
+    "Date", "HomeTeam", "AwayTeam", "home_n", "away_n",
+    "H", "D", "A", "O25", "mesafe", "sinyal", "sinyal_pct", "kaynak",
+]
+
 SPORTS_CORE = [
+    "soccer_uefa_champs_league",
     "soccer_uefa_europa_league",
     "soccer_uefa_europa_conference_league",
-    "soccer_uefa_champs_league",
-    "soccer_england_efl_cup",
+    "soccer_uefa_nations_league",
     "soccer_epl",
     "soccer_efl_champ",
+    "soccer_england_league1",
+    "soccer_england_league2",
+    "soccer_england_efl_cup",
     "soccer_spain_la_liga",
+    "soccer_spain_segunda_division",
     "soccer_italy_serie_a",
+    "soccer_italy_serie_b",
     "soccer_germany_bundesliga",
+    "soccer_germany_bundesliga2",
     "soccer_france_ligue_one",
+    "soccer_france_ligue_two",
     "soccer_netherlands_eredivisie",
     "soccer_turkey_super_league",
+    "soccer_portugal_primeira_liga",
+    "soccer_belgium_first_div",
     "soccer_spl",
-    "soccer_spain_segunda_division",
     "soccer_switzerland_superleague",
+    "soccer_austria_bundesliga",
+    "soccer_greece_super_league",
+    "soccer_denmark_superliga",
+    "soccer_norway_eliteserien",
+    "soccer_sweden_allsvenskan",
+    "soccer_poland_ekstraklasa",
+    "soccer_usa_mls",
+    "soccer_brazil_campeonato",
+    "soccer_argentina_primera_division",
+    "soccer_saudi_arabia_pro_league",
+    "soccer_japan_j_league",
 ]
 
 HOME_ODDS_MIN = 1.33
@@ -113,6 +141,11 @@ def read_csv_flex(path):
     return None
 
 
+def write_signals(rows):
+    os.makedirs(DATA_DIR, exist_ok=True)
+    pd.DataFrame(rows, columns=SIGNAL_COLS).to_csv(SIGNALS_FILE, index=False)
+
+
 def standardize(df):
     out = df.copy()
     h = pick_col(out, ["B365H", "AvgH", "PSH", "BbAvH", "H", "Pinnacle Home"])
@@ -164,7 +197,7 @@ def load_local_history():
         csv_paths.extend(glob.glob(os.path.join(root, "**", "*.csv"), recursive=True))
     for path in csv_paths:
         name = os.path.basename(path).lower()
-        if name == "son_sinyaller.csv":
+        if name in ("son_sinyaller.csv", "canli_eklenen.csv"):
             continue
         df = read_csv_flex(path)
         if df is None or len(df) == 0:
@@ -310,7 +343,11 @@ def fetch_bulletin_soccerbets(only_today=True):
             out["FTHG"] = pd.to_numeric(df[hg], errors="coerce")
             out["FTAG"] = pd.to_numeric(df[ag], errors="coerce")
         if only_today and date_c:
-            out = out[out["Date"].map(parse_any_date) == today_date()]
+            out["_d"] = out["Date"].map(parse_any_date)
+            newest = out["_d"].max()
+            out = out[out["_d"] == today_date()]
+            if newest is not None and pd.notna(newest) and newest < today_date():
+                print("soccerbets eski dosya, son tarih", newest)
         out = out.dropna(subset=["H", "D", "A", "HomeTeam", "AwayTeam"])
         print("soccerbets maç", len(out))
         return out.reset_index(drop=True)
@@ -320,19 +357,31 @@ def fetch_bulletin_soccerbets(only_today=True):
 
 
 def fetch_bulletin_fixtures():
-    try:
-        r = requests.get(FIXTURES_URL, timeout=30)
-        r.raise_for_status()
-        fx = pd.read_csv(pd.io.common.StringIO(r.text))
-        fx = standardize(fx)
-        fx = fx.dropna(subset=["H", "D", "A", "HomeTeam", "AwayTeam"])
-        fx = fx[fx["Date"].astype(str) == today_str()].copy()
-        fx["kaynak"] = "fixtures_csv"
-        print("fixtures maç", len(fx))
-        return fx.reset_index(drop=True)
-    except Exception as e:
-        print("fixtures hata", e)
-        return pd.DataFrame()
+    last_err = None
+    stamp = int(datetime.now(TR).timestamp())
+    for base in FIXTURES_MIRRORS:
+        try:
+            r = requests.get(f"{base}?t={stamp}", timeout=30, headers={"Cache-Control": "no-cache"})
+            r.raise_for_status()
+            fx = pd.read_csv(pd.io.common.StringIO(r.text))
+            fx = standardize(fx)
+            fx = fx.dropna(subset=["H", "D", "A", "HomeTeam", "AwayTeam"])
+            if "Date" in fx.columns:
+                fx["_d"] = fx["Date"].map(parse_any_date)
+                horizon = today_date().toordinal() + 1
+                today = fx[fx["_d"].map(lambda d: d is not None and today_date().toordinal() <= d.toordinal() <= horizon)].copy()
+            else:
+                today = fx.iloc[0:0].copy()
+            print("fixtures", base, "dosya", len(fx), "48s", len(today), "mod", r.headers.get("last-modified"))
+            if len(today):
+                today["kaynak"] = "fixtures_csv"
+                return today.drop(columns=[c for c in ["_d"] if c in today.columns]).reset_index(drop=True)
+            last_err = f"bugun 0, son tarih {fx['Date'].astype(str).max() if len(fx) else '-'}"
+        except Exception as e:
+            last_err = str(e)
+            print("fixtures hata", base, e)
+    print("fixtures bos", last_err)
+    return pd.DataFrame()
 
 
 def merge_matches(*frames, how="bulletin"):
@@ -489,8 +538,10 @@ def fmt_match(row, st):
     n30, n100 = st["n30"], st["n100"]
     o25 = row.get("O25")
     o_txt = f"{float(o25):.2f}" if pd.notna(o25) else "-"
+    d = row.get("Date")
+    d_txt = str(d)[:10] if d is not None and str(d) != "nan" else today_str()
     return (
-        f"<b>{row['HomeTeam']} - {row['AwayTeam']}</b>\n"
+        f"<b>{row['HomeTeam']} - {row['AwayTeam']}</b>  {d_txt}\n"
         f"1/X/2: {row['H']:.2f} / {row['D']:.2f} / {row['A']:.2f}   O2.5: {o_txt}\n"
         f"Mesafe: {st['mesafe']}\n"
         f"n30   H %{n30['H']:.1f} | A %{n30['A']:.1f} | O %{n30['O']:.1f} | BTTS %{n30['B']:.1f}\n"
@@ -509,7 +560,13 @@ def scan_signals(hist):
         send_telegram("❌ Tarihsel data okunamadı.")
         return
     if fx is None or len(fx) == 0:
-        send_telegram(f"⚠️ {today_str()} için oranlı maç yok.")
+        write_signals([])
+        send_telegram(
+            f"⚠️ {today_str()} için oranlı maç yok.\n"
+            "SoccerBets dosyası 30 Eylül'den beri yenilenmiyor.\n"
+            "football-data fixtures sabah geç düşüyor; Odds API anahtarı yoksa o kanal da boş.\n"
+            "Eski sinyal dosyası silindi."
+        )
         return
 
     rows, blocks = [], []
@@ -523,7 +580,7 @@ def scan_signals(hist):
             drops[why] = drops.get(why, 0) + 1
             continue
         rows.append({
-            "Date": today_str(),
+            "Date": str(m.get("Date") or today_str())[:10],
             "HomeTeam": m["HomeTeam"],
             "AwayTeam": m["AwayTeam"],
             "home_n": norm_name(m["HomeTeam"]),
@@ -536,11 +593,14 @@ def scan_signals(hist):
         })
         blocks.append((st["sinyal_pct"], -st["mesafe"], fmt_match(m, st), st))
 
+    write_signals(rows)
+
     if not blocks:
         msg = [
             f"📊 {today_str()}",
             f"Taranan: {len(fx)} maç",
             "Kapıdan geçen sinyal yok.",
+            "Eski bülten dosyası temizlendi.",
         ]
         for k, v in sorted(drops.items(), key=lambda kv: -kv[1]):
             msg.append(f"{k}: {v}")
@@ -569,8 +629,6 @@ def scan_signals(hist):
         for k, v in sorted(drops.items(), key=lambda kv: -kv[1]):
             lines.append(f"{k}: {v}")
     send_telegram("\n".join(lines))
-    os.makedirs(DATA_DIR, exist_ok=True)
-    pd.DataFrame(rows).to_csv(SIGNALS_FILE, index=False)
 
 
 def results_from_soccerbets():
@@ -723,14 +781,25 @@ def update_and_review(hist):
         "",
     ]
     if not os.path.exists(SIGNALS_FILE):
-        lines.append("Sabah sinyal dosyası yok.")
+        lines.append("Bugün sinyal dosyası yok. Eski bülten tekrar edilmedi.")
         send_telegram("\n".join(lines))
         return
     sig = read_csv_flex(SIGNALS_FILE)
     if sig is None or len(sig) == 0:
-        lines.append("Sabah sinyal dosyası boş.")
+        lines.append("Bugün kapıdan geçen sinyal yok. Eski bülten tekrar edilmedi.")
         send_telegram("\n".join(lines))
         return
+    if "Date" in sig.columns:
+        today_sig = sig[sig["Date"].map(parse_any_date) == today_date()]
+        if len(today_sig) == 0:
+            old_dates = sorted({str(x) for x in sig["Date"].dropna().unique()})
+            lines.append("Dosyadaki sinyaller bugüne ait değil.")
+            lines.append(f"Eski tarih: {', '.join(old_dates)}")
+            lines.append("Eski bülten tekrar edilmedi.")
+            write_signals([])
+            send_telegram("\n".join(lines))
+            return
+        sig = today_sig
     if "home_n" not in sig.columns:
         sig["home_n"] = sig["HomeTeam"].map(norm_name)
         sig["away_n"] = sig["AwayTeam"].map(norm_name)
@@ -746,7 +815,7 @@ def update_and_review(hist):
         merged["FTAG"] = merged["FTAG_res"]
     added = grow_history(merged)
     ok = wait = miss = 0
-    lines.append("Sabah sinyalleri vs sonuç")
+    lines.append("Bugünün sinyalleri vs sonuç")
     for _, r in merged.iterrows():
         name = f"{r['HomeTeam']} - {r['AwayTeam']}"
         sig_name = str(r.get("sinyal", ""))
