@@ -366,17 +366,19 @@ def fetch_bulletin_fixtures():
             fx = pd.read_csv(pd.io.common.StringIO(r.text))
             fx = standardize(fx)
             fx = fx.dropna(subset=["H", "D", "A", "HomeTeam", "AwayTeam"])
+            mod = r.headers.get("last-modified") or "?"
             if "Date" in fx.columns:
                 fx["_d"] = fx["Date"].map(parse_any_date)
-                horizon = today_date().toordinal() + 1
-                today = fx[fx["_d"].map(lambda d: d is not None and today_date().toordinal() <= d.toordinal() <= horizon)].copy()
+                today = fx[fx["_d"] == today_date()].copy()
             else:
                 today = fx.iloc[0:0].copy()
-            print("fixtures", base, "dosya", len(fx), "48s", len(today), "mod", r.headers.get("last-modified"))
+            print("fixtures", base, "dosya", len(fx), "bugun", len(today), "mod", mod)
+            today.attrs["fresh"] = mod
+            today.attrs["file_n"] = len(fx)
             if len(today):
                 today["kaynak"] = "fixtures_csv"
                 return today.drop(columns=[c for c in ["_d"] if c in today.columns]).reset_index(drop=True)
-            last_err = f"bugun 0, son tarih {fx['Date'].astype(str).max() if len(fx) else '-'}"
+            last_err = f"bugun 0, dosya mod {mod}"
         except Exception as e:
             last_err = str(e)
             print("fixtures hata", base, e)
@@ -563,9 +565,9 @@ def scan_signals(hist):
         write_signals([])
         send_telegram(
             f"⚠️ {today_str()} için oranlı maç yok.\n"
-            "SoccerBets dosyası 30 Eylül'den beri yenilenmiyor.\n"
-            "football-data fixtures sabah geç düşüyor; Odds API anahtarı yoksa o kanal da boş.\n"
-            "Eski sinyal dosyası silindi."
+            "fixtures.csv 9 Ekim'den beri yenilenmiyor.\n"
+            "SoccerBets 30 Eylül'den beri donuk.\n"
+            "Geniş bülten için ODDS_API_KEY gerekli."
         )
         return
 
@@ -600,7 +602,8 @@ def scan_signals(hist):
             f"📊 {today_str()}",
             f"Taranan: {len(fx)} maç",
             "Kapıdan geçen sinyal yok.",
-            "Eski bülten dosyası temizlendi.",
+            "Kaynak: fixtures.csv (son yenileme 9 Ekim). Pazartesi kartı bu dosyada ince.",
+            "Geniş bülten için ODDS_API_KEY şart.",
         ]
         for k, v in sorted(drops.items(), key=lambda kv: -kv[1]):
             msg.append(f"{k}: {v}")
