@@ -84,8 +84,6 @@ MIN_OVER = 72.0
 MIN_BTTS = 72.0
 MIN_BTTS_N30 = 70.0
 MIN_BTTS_N100 = 65.0
-O25_MIN = 1.40
-O25_MAX = 1.85
 HOME_SHORT_BAND_MAX = 1.45
 HOME_SHORT_N100 = 70.0
 HOME_SHORT_DIST = 0.12
@@ -512,8 +510,6 @@ def pass_signal(row, st):
     if typ == "Over":
         if o25 is None:
             return False, "DROP_NO_O25"
-        if o25 < O25_MIN or o25 > O25_MAX:
-            return False, "DROP_O25_PRICE"
         if pct < MIN_OVER:
             return False, "DROP_PCT"
         if abs(n30["O"] - n100["O"]) >= SPLIT_MAX:
@@ -523,8 +519,6 @@ def pass_signal(row, st):
     if typ == "BTTS":
         if o25 is None:
             return False, "DROP_NO_O25"
-        if o25 < O25_MIN or o25 > O25_MAX:
-            return False, "DROP_O25_PRICE"
         if pct < MIN_BTTS:
             return False, "DROP_PCT"
         if n30["B"] < MIN_BTTS_N30 or n100["B"] < MIN_BTTS_N100:
